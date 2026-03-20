@@ -1,0 +1,42 @@
+---
+version: 1.3.0
+built_at: '2026-03-19T19:17:10Z'
+git_commit: 112216d4
+environment:
+  REGISTRY_TAG: 1.3.0
+  BUILD_DATE: '2026-03-19T19:17:10Z'
+  GIT_COMMIT: 112216d4
+images:
+  chroma-db:
+    image: chromadb/chroma:0.4.24
+    digest: external
+    built_at: '2026-03-19T19:17:10Z'
+  app:
+    image: ghcr.io/james-barnard/historian-app:1.3.0
+    digest: sha256:8db30057dfa5222e958c7ac404aa899f06d85b0271fe5f9d02914906251745d9
+    built_at: '2026-03-19T19:17:12Z'
+  sidekiq:
+    image: ghcr.io/james-barnard/historian-app:1.3.0
+    digest: sha256:8db30057dfa5222e958c7ac404aa899f06d85b0271fe5f9d02914906251745d9
+    built_at: '2026-03-19T19:17:12Z'
+  audio-gateway:
+    image: ghcr.io/james-barnard/historian-audio-gateway:1.3.0
+    digest: sha256:5aaa30b277acf3e7e8015f3fd00c00df087a9d39232cb087a55121f76e5ce2fb
+    built_at: '2026-03-19T19:17:12Z'
+  app-proxy:
+    image: ghcr.io/james-barnard/historian-app-proxy:1.3.0
+    digest: sha256:116a0b4813eeebe247f0cd16006edf51a455efd31e4273eea81678fd1b831ffa
+    built_at: '2026-03-19T19:17:12Z'
+  historian-tts:
+    image: ghcr.io/james-barnard/historian-tts:1.3.0
+    digest: sha256:c77bdb68c20bbb4ce2a388e276d7fd57f40d8e5a028fb5204adc90acb2836cd1
+    built_at: '2026-03-19T19:17:12Z'
+  asr:
+    image: ghcr.io/james-barnard/historian-asr:1.3.0
+    digest: sha256:8b36bf9612f0449b75f3d670fb76c22cdbf673be5bf945775f7b7f99e81a0403
+    built_at: '2026-03-19T19:17:12Z'
+  embed:
+    image: ghcr.io/james-barnard/historian-embed:1.3.0
+    digest: sha256:d3b21018a31b78b3f23513a0a8564dcc112346b57a005825e00d268877103711
+    built_at: '2026-03-19T19:17:12Z'
+compose_file: compose.registry.yml

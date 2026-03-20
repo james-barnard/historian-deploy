@@ -1,0 +1,353 @@
+services:
+  ollama:
+    image: ollama/ollama:0.14.1
+    container_name: historian-ollama
+    restart: unless-stopped
+    runtime: nvidia
+    entrypoint: ["/bin/bash", "-c"]
+    command: ["ollama serve"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - /data/historian/ollama:/root/.ollama
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - OLLAMA_NUM_GPU=1
+      - OLLAMA_BACKEND=gpu
+      - OLLAMA_GPU_OVERHEAD=1073741824
+      - OLLAMA_MAX_LOADED_MODELS=3  # Keep 70B + FunctionGemma loaded simultaneously (128GB headroom)
+      - OLLAMA_MODELS=/root/.ollama
+      - OLLAMA_KEEP_ALIVE=-1  # Never unload — dedicated appliance with 128GB headroom
+      # Note: Context size, batch size, and parallel are set via Modelfile
+    networks:
+      - historian-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  app:
+    image: ghcr.io/james-barnard/historian-app:${REGISTRY_TAG:-latest}
+    container_name: historian-app
+    restart: unless-stopped
+    # Ports exposed only through app-proxy (no direct external access)
+    volumes:
+      - /data/historian/vault:/vault
+      - /data/historian/database/sqlite:/data
+      - /data/historian/models:/models
+      - /logs/historian/app:/logs
+    environment:
+      - HIST_VAULT_DIR=/vault
+      - HIST_DB_PATH=/data/historian.sqlite
+      - HIST_MODELS_DIR=/models
+      - HIST_LOGS_DIR=/logs
+      - HIST_ASR_URL=http://asr:9001
+      - HIST_EMBED_URL=http://embed:9002
+      - HIST_AI_URL=http://ollama:11434
+      - FUNCTION_GEMMA_MODEL=functiongemma:270m
+      - REDIS_URL=redis://redis:6379
+      - RACK_ENV=production
+      - LOG_LEVEL=${HIST_LOG_LEVEL:-INFO}
+      - OWNER_NAME=James Barnard
+      # Model selection now handled by ModelConfig (config/models.yml)
+      # Platform auto-detected: gx10 (prod)
+      # Override with: HISTORIAN_PLATFORM, CONTEXT_PASS_MODEL, EVENTS_PASS_MODEL
+    depends_on:
+      - redis
+      - sidekiq
+      - asr
+      - embed
+      - chroma-db
+      - ollama
+    networks:
+      - historian-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/debug/stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  app-proxy:
+    image: ghcr.io/james-barnard/historian-app-proxy:${REGISTRY_TAG:-latest}
+    container_name: historian-app-proxy
+    restart: unless-stopped
+    ports:
+      - "8443:443" # External HTTPS port
+      - "8080:80"  # External HTTP port for test fixture
+    volumes:
+      - /data/historian/app-ssl:/etc/nginx/ssl
+    environment:
+      - GX10_IP=${GX10_IP:-192.168.68.132}
+    depends_on:
+      - app
+    networks:
+      - historian-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "2"
+
+  sidekiq:
+    image: ghcr.io/james-barnard/historian-app:${REGISTRY_TAG:-latest}
+    container_name: historian-sidekiq
+    restart: unless-stopped
+    command: ["bundle", "exec", "sidekiq", "-r", "./app.rb", "-C", "./config/sidekiq.yml"]
+    volumes:
+      - /data/historian/vault:/vault
+      - /data/historian/database/sqlite:/data
+      - /data/historian/models:/models
+      - /logs/historian/sidekiq:/logs
+    environment:
+      - HIST_VAULT_DIR=/vault
+      - HIST_DB_PATH=/data/historian.sqlite
+      - HIST_MODELS_DIR=/models
+      - HIST_LOGS_DIR=/logs
+      - HIST_ASR_URL=http://asr:9001
+      - HIST_EMBED_URL=http://embed:9002
+      - HIST_AI_URL=http://ollama:11434
+      - FUNCTION_GEMMA_MODEL=functiongemma:270m
+      - REDIS_URL=redis://redis:6379
+      - RACK_ENV=production
+      - OWNER_NAME=James Barnard
+      # Model selection now handled by ModelConfig (config/models.yml)
+      # Platform auto-detected: gx10 (prod)
+      # Override with: HISTORIAN_PLATFORM, CONTEXT_PASS_MODEL, EVENTS_PASS_MODEL
+    depends_on:
+      - redis
+      - asr
+      - embed
+      - chroma-db
+      - ollama
+    networks:
+      - historian-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "2"
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "sidekiq"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  redis:
+    image: redis:7.2.4-alpine  # Pinned version for stability
+    container_name: historian-redis
+    restart: unless-stopped
+    command: redis-server --save "" --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - /logs/historian/redis:/logs
+    networks:
+      - historian-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "2"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  asr:
+    image: ghcr.io/james-barnard/historian-asr:${REGISTRY_TAG:-latest}
+    container_name: historian-asr
+    restart: unless-stopped
+    runtime: nvidia
+    ports:
+      - "9001:9001"
+    volumes:
+      - /data/historian/models:/models
+      - /data/historian/vault:/vault:ro
+    environment:
+      - MODELS_DIR=/models
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    networks:
+      - historian-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  chroma-db:
+    image: chromadb/chroma:0.4.24
+    container_name: historian-chroma-db
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - /data/historian/database/chroma:/chroma/chroma
+    environment:
+      - CHROMA_SERVER_HOST=0.0.0.0
+      - CHROMA_SERVER_HTTP_PORT=8000
+    networks:
+      - historian-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  embed:
+    image: ghcr.io/james-barnard/historian-embed:${REGISTRY_TAG:-latest}
+    container_name: historian-embed
+    restart: unless-stopped
+    ports:
+      - "9002:9002"
+    volumes:
+      - /data/historian/models:/models
+    environment:
+      - MODELS_DIR=/models
+      - SENTENCE_TRANSFORMERS_MODEL=sentence-transformers/all-MiniLM-L6-v2
+      - CHROMA_HOST=chroma-db
+      - CHROMA_PORT=8000
+      - ORT_LOGGING_LEVEL=3
+    command: uvicorn chroma_embed:app --host 0.0.0.0 --port 9002
+    depends_on:
+      - chroma-db
+    networks:
+      - historian-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  audio-gateway:
+    image: ghcr.io/james-barnard/historian-audio-gateway:${REGISTRY_TAG:-latest}
+    container_name: historian-audio-gateway
+    restart: unless-stopped
+    ports:
+      - "8446:8446"  # Watcher WebSocket port
+    volumes:
+      - /logs/historian/audio-gateway:/logs
+      - /data/historian/soundtrack:/app/soundtrack
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - HISTORIAN_URL=http://app:8080
+      - HIST_ASR_URL=http://asr:9001
+      - NEMO_TTS_URL=http://historian-tts:8000
+      - LOG_LEVEL=${HIST_LOG_LEVEL:-INFO}
+      - ASR_TIMEOUT=30
+      - DIALOG_TIMEOUT=120
+      - TTS_TIMEOUT=90
+      - COQUI_TOS_AGREED=1
+    depends_on:
+      - redis
+      - app
+      - asr
+      - historian-tts
+    networks:
+      - historian-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "2"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8446/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  historian-tts:
+    image: ghcr.io/james-barnard/historian-tts:${REGISTRY_TAG:-latest}
+    container_name: historian-tts
+    restart: unless-stopped
+    runtime: nvidia
+    ports:
+      - "8001:8000"
+    volumes:
+      - /data/historian/models:/models:ro
+      - /data/historian/vault:/vault:ro
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - MODELS_DIR=/models
+      - TTS_VOLUME=${TTS_VOLUME:-1.0}
+    networks:
+      - historian-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+networks:
+  historian-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  historian-vault:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/historian/vault
+  historian-database:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/historian/database
+  historian-models:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/historian/models
+  historian-logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /logs/historian

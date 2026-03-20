@@ -1,0 +1,91 @@
+# Historian Service Configuration
+# This file defines all services and their dependencies
+# Note: compose_file path is relative to the deploy repo root
+
+services:
+  redis:
+    image: "redis:7"
+    ports: []
+    health_check: "redis"
+    dependencies: []
+    description: "Redis cache and job queue"
+
+  ollama:
+    image: "ollama/ollama:latest"
+    ports: ["11434:11434"]
+    health_check: "http://localhost:11434/api/tags"
+    dependencies: []
+    models:
+      primary: "llama3.1:70b-instruct-q4_K_M"
+      recommended:
+        - "llama3.1:70b-instruct-q4_K_M"
+        - "qwen2.5:72b-instruct-q4_K_M"
+      categories:
+        primary:
+          - "llama3.1:70b-instruct-q4_K_M"
+          - "qwen2.5:72b-instruct-q4_K_M"
+    description: "Ollama AI model server with GX10-optimized 70B models"
+
+  asr:
+    image: "ghcr.io/james-barnard/historian-asr:${REGISTRY_TAG:-latest}"
+    ports: ["9001:9001"]
+    health_check: "http://localhost:9001/health"
+    dependencies: []
+    description: "Automatic Speech Recognition service"
+
+  chroma-db:
+    image: "ghcr.io/james-barnard/historian-chroma-db:${REGISTRY_TAG:-latest}"
+    ports: ["8000:8000"]
+    health_check: "http://localhost:8000/api/v1/version"
+    dependencies: []
+    description: "ChromaDB vector database"
+
+  embed:
+    image: "ghcr.io/james-barnard/historian-embed:${REGISTRY_TAG:-latest}"
+    ports: ["9002:9002"]
+    health_check: "http://localhost:9002/health"
+    dependencies: ["chroma-db"]
+    description: "Text embedding service with ChromaDB"
+
+  app:
+    image: "ghcr.io/james-barnard/historian-app:${REGISTRY_TAG:-latest}"
+    ports: []
+    health_check: "http://localhost:8080/health"
+    dependencies: ["redis", "asr", "embed", "chroma-db", "ollama"]
+    description: "Main Historian application"
+
+  app-proxy:
+    image: "ghcr.io/james-barnard/historian-app-proxy:${REGISTRY_TAG:-latest}"
+    ports: ["8443:443", "8080:80"]
+    health_check: "http://localhost:8080/health"
+    dependencies: ["app"]
+    description: "Nginx proxy for Historian application with SSL termination"
+
+  sidekiq:
+    image: "ghcr.io/james-barnard/historian-app:${REGISTRY_TAG:-latest}"
+    command: "bundle exec sidekiq -r ./app.rb"
+    ports: []
+    health_check: "redis"
+    dependencies: ["redis", "asr", "embed", "chroma-db", "ollama"]
+    description: "Background job processor"
+
+  audio-gateway:
+    image: "ghcr.io/james-barnard/historian-audio-gateway:${REGISTRY_TAG:-latest}"
+    ports: ["8446:8446"]
+    health_check: "http://localhost:8446/health"
+    dependencies: ["app", "asr", "historian-tts"]
+    description: "WebSocket voice gateway with NeMo TTS"
+
+  historian-tts:
+    image: "ghcr.io/james-barnard/historian-tts:${REGISTRY_TAG:-latest}"
+    ports: ["8001:8000"]
+    health_check: "http://localhost:8000/health"
+    dependencies: []
+    description: "NeMo FastPitch + HiFi-GAN TTS for narration-quality speech"
+
+# Global configuration
+config:
+  compose_file: "compose.registry.yml"
+  project_name: "historian"
+  health_check_timeout: 45
+  health_check_interval: 3

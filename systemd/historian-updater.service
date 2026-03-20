@@ -1,0 +1,19 @@
+[Unit]
+Description=Historian Update Checker
+After=network-online.target docker.service
+Wants=network-online.target
+Documentation=https://github.com/james-barnard/historian-deploy
+
+[Service]
+Type=oneshot
+ExecStart=/opt/historian/bin/hist update
+User=root
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=historian-updater
+
+# Safety: don't let the update run forever
+TimeoutStartSec=600
+
+# Environment
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"

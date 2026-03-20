@@ -1,0 +1,110 @@
+#!/usr/bin/env ruby
+
+# hist-release — Historian release packager
+#
+# Runs on the dev Mac. Builds, signs, and uploads release packages to S3.
+#
+# Usage:
+#   hist-release                          Build + sign + upload (0% rollout)
+#   hist-release --dry-run                Preview what would be packaged
+#   hist-release --skip-upload            Build + sign locally only
+#   hist-release --version 1.4.0          Specify version explicitly
+#   hist-release rollout 1.3.1 --percent 10   Set rollout percentage
+#   hist-release rollout 1.3.1 --percent 0    Kill switch
+
+script_dir = File.dirname(File.expand_path(__FILE__))
+deploy_root = File.dirname(script_dir)
+$LOAD_PATH.unshift(File.join(deploy_root, "lib"))
+
+require_relative "../lib/release_packager"
+
+def show_usage
+  puts <<~USAGE
+    Historian Release Packager
+
+    Usage: #{$PROGRAM_NAME} [options]
+           #{$PROGRAM_NAME} rollout <version> --percent <N>
+
+    Package & Upload:
+      --dry-run          Preview without building or uploading
+      --skip-upload      Build and sign locally, don't push to S3
+      --version <ver>    Specify version (default: reads VERSION file)
+      --min-version <v>  Minimum device version for this update (default: 1.0.0)
+
+    Rollout Control:
+      rollout <version> --percent <N>    Set rollout percentage (0-100)
+                                         0 = kill switch, 100 = full fleet
+
+    Examples:
+      #{$PROGRAM_NAME}                              # Full release
+      #{$PROGRAM_NAME} --dry-run                    # Preview
+      #{$PROGRAM_NAME} --version 1.4.0              # Explicit version
+      #{$PROGRAM_NAME} rollout 1.3.1 --percent 10   # 10% rollout
+      #{$PROGRAM_NAME} rollout 1.3.1 --percent 100  # Full fleet
+      #{$PROGRAM_NAME} rollout 1.3.1 --percent 0    # Pull it back
+  USAGE
+end
+
+def parse_options
+  options = {
+    version: nil,
+    dry_run: false,
+    skip_upload: false,
+    min_version: nil,
+  }
+
+  i = 0
+  while i < ARGV.length
+    case ARGV[i]
+    when "--dry-run"
+      options[:dry_run] = true
+    when "--skip-upload"
+      options[:skip_upload] = true
+    when "--version"
+      i += 1
+      options[:version] = ARGV[i]
+    when "--min-version"
+      i += 1
+      options[:min_version] = ARGV[i]
+    when "--help", "-h"
+      show_usage
+      exit 0
+    end
+    i += 1
+  end
+
+  options
+end
+
+def main
+  if ARGV.empty? || ARGV[0] == "--help" || ARGV[0] == "-h"
+    if ARGV.empty?
+      # No args = full release
+    else
+      show_usage
+      exit 0
+    end
+  end
+
+  # Handle rollout subcommand
+  if ARGV[0] == "rollout"
+    version = ARGV[1]
+    percent_idx = ARGV.index("--percent")
+
+    unless version && percent_idx && ARGV[percent_idx + 1]
+      puts "Usage: #{$PROGRAM_NAME} rollout <version> --percent <N>"
+      exit 1
+    end
+
+    percent = ARGV[percent_idx + 1].to_i
+    ReleasePackager.rollout(version, percent)
+    exit 0
+  end
+
+  # Full release pipeline
+  options = parse_options
+  packager = ReleasePackager.new(**options)
+  packager.release!
+end
+
+main

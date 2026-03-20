@@ -1,0 +1,120 @@
+#!/usr/bin/env ruby
+
+# Historian Factory Provisioner
+#
+# Takes a fresh, out-of-the-box hardware platform from bare metal
+# to a fully-loaded, smoke-tested Historian appliance — sealed
+# and ready for shipping to a customer.
+#
+# This is a FACTORY tool, not a customer tool.
+# Customer-side setup (network, owner identity, Watcher pairing)
+# is handled by historian-setup (future).
+#
+# Usage:
+#   sudo ./prod/bin/historian-provision [OPTIONS]
+#
+# Options:
+#   --platform PLATFORM   Override auto-detection (jetson_orin_nano, gx10)
+#   --dry-run             Show plan without executing
+#   --skip-deploy         Provision only, don't pull images or start services
+#   --skip-seal           Leave services running after smoke test
+#   --help                Show this help
+
+# Find the prod directory relative to this script
+script_dir = File.dirname(File.expand_path(__FILE__))
+prod_dir = File.dirname(script_dir)
+
+# Add prod/lib to the load path
+$LOAD_PATH.unshift(File.join(prod_dir, "lib"))
+
+require_relative "../lib/provisioner"
+
+def show_usage
+  puts <<~USAGE
+    Historian Factory Provisioner
+
+    Takes a fresh hardware platform from bare metal to a smoke-tested
+    Historian appliance, sealed and ready for shipping.
+
+    Usage: #{$PROGRAM_NAME} [OPTIONS]
+
+    Options:
+      --platform PLATFORM   Override auto-detection (jetson_orin_nano, gx10)
+      --dry-run             Show plan without executing anything
+      --skip-deploy         Provision system only, skip image pull and services
+      --skip-seal           Leave services running after smoke test (for debugging)
+      --help                Show this help
+
+    Supported platforms:
+      jetson_orin_nano      NVIDIA Jetson Orin Nano (Dev Kit) — 8GB RAM
+      gx10                  Asus Ascent GX10 — 128GB RAM
+
+    Examples:
+      sudo #{$PROGRAM_NAME}                          # Auto-detect and provision
+      sudo #{$PROGRAM_NAME} --platform jetson_orin_nano  # Force Jetson platform
+      sudo #{$PROGRAM_NAME} --dry-run                # Preview without changes
+      sudo #{$PROGRAM_NAME} --skip-seal              # Keep services running
+  USAGE
+end
+
+def parse_args(args)
+  options = {
+    platform: nil,
+    dry_run: false,
+    skip_deploy: false,
+    skip_seal: false,
+  }
+
+  i = 0
+  while i < args.length
+    case args[i]
+    when "--platform"
+      i += 1
+      options[:platform] = args[i] if i < args.length
+    when "--dry-run"
+      options[:dry_run] = true
+    when "--skip-deploy"
+      options[:skip_deploy] = true
+    when "--skip-seal"
+      options[:skip_seal] = true
+    when "--help", "-h"
+      show_usage
+      exit 0
+    else
+      puts "Unknown option: #{args[i]}"
+      show_usage
+      exit 1
+    end
+    i += 1
+  end
+
+  options
+end
+
+def main
+  options = parse_args(ARGV)
+
+  # Check for root (most provisioning steps require it)
+  unless options[:dry_run] || Process.uid == 0
+    puts "❌ This tool must be run as root (sudo)."
+    puts "   Use --dry-run to preview without root."
+    exit 1
+  end
+
+  begin
+    provisioner = Provisioner.new(
+      platform: options[:platform],
+      dry_run: options[:dry_run],
+      skip_deploy: options[:skip_deploy],
+      skip_seal: options[:skip_seal],
+    )
+    provisioner.run
+  rescue StandardError => e
+    puts ""
+    puts "❌ Provisioning failed: #{e.message}"
+    puts e.backtrace.first(5).map { |l| "   #{l}" }.join("\n") if ENV["DEBUG"]
+    exit 1
+  end
+end
+
+main if __FILE__ == $PROGRAM_NAME

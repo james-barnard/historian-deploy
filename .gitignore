@@ -1,0 +1,21 @@
+# OS/editor
+.DS_Store
+*.swp
+*~
+
+# Ruby
+Gemfile.lock
+.bundle/
+vendor/
+
+# Signing keys (NEVER commit private keys)
+*.key
+keys/update-signing.key
+
+# Staging/build artifacts
+*.tar.gz
+*.sig
+update_manifest.yml
+
+# Temp
+tmp/

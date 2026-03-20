@@ -1,0 +1,12 @@
+# Historian Update Configuration
+# This file is installed during factory provisioning.
+# The device uses this to connect to the update API.
+
+# Update API endpoint (Lambda + API Gateway)
+api_url: "https://api.historian.example.com/v1/check-update"
+
+# Device authentication token (unique per device, provisioned at factory)
+device_token: "REPLACE_WITH_DEVICE_TOKEN"
+
+# Check interval is controlled by the systemd timer, not here.
+# Default: every 4 hours (see systemd/historian-updater.timer)

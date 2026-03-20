@@ -1,0 +1,122 @@
+#!/usr/bin/env ruby
+
+# Historian Production CLI
+#
+# Operational commands for a production Historian appliance.
+# For development tooling (models, A/B testing, data remediation),
+# use the full HSM in the main historian repo.
+
+script_dir = File.dirname(File.expand_path(__FILE__))
+deploy_root = File.dirname(script_dir)
+
+$LOAD_PATH.unshift(File.join(deploy_root, "lib"))
+
+require_relative "../lib/service_manager"
+
+def show_usage
+  puts <<~USAGE
+    Historian Production CLI
+
+    Usage: #{$PROGRAM_NAME} <command> [args]
+
+    Operations:
+      status [service]       Show service status
+      deploy                 Deploy from deployment.lock
+      logs <service>         Show recent logs
+      health [service]       Health check
+      list                   List all services
+      update [--now]         Check for updates from release server
+      init-owner [NAME]      Set owner identity (first-run only)
+
+    Examples:
+      #{$PROGRAM_NAME} status              # All service status
+      #{$PROGRAM_NAME} deploy              # Deploy from lock file
+      #{$PROGRAM_NAME} logs app            # View app logs
+      #{$PROGRAM_NAME} logs audio-gateway  # View gateway logs
+      #{$PROGRAM_NAME} health              # Check all service health
+      #{$PROGRAM_NAME} update              # Check for updates
+      #{$PROGRAM_NAME} update --now        # Force update check
+      #{$PROGRAM_NAME} status --telemetry  # Show update telemetry payload
+  USAGE
+end
+
+def main
+  if ARGV.empty? || %w[help --help -h].include?(ARGV[0])
+    show_usage
+    exit 0
+  end
+
+  command = ARGV[0]
+
+  begin
+    manager = ServiceManager.new
+
+    case command
+    when "status"
+      if ARGV.include?("--telemetry")
+        show_telemetry
+      else
+        manager.status(ARGV[1])
+      end
+    when "deploy"
+      require_relative "../lib/deployment_orchestrator"
+      orchestrator = DeploymentOrchestrator.new
+      orchestrator.deploy
+    when "logs"
+      if ARGV[1].nil?
+        puts "Error: Service name required for logs command"
+        exit 1
+      end
+      puts manager.logs(ARGV[1])
+    when "health"
+      manager.health_check(ARGV[1])
+    when "list"
+      manager.list_services
+    when "update"
+      handle_update_command
+    when "init-owner"
+      manager.run_init_owner(ARGV[1])
+    when "start", "up"
+      manager.start(ARGV[1])
+    when "stop"
+      manager.stop(ARGV[1])
+    when "restart"
+      manager.restart(ARGV[1])
+    else
+      puts "Error: Unknown command '#{command}'"
+      show_usage
+      exit 1
+    end
+  rescue StandardError => e
+    puts "Error: #{e.message}"
+    exit 1
+  end
+end
+
+def handle_update_command
+  begin
+    require_relative "../lib/updater"
+    updater = Updater.new(force: ARGV.include?("--now"))
+    updater.check_and_apply
+  rescue LoadError
+    puts "⚠️  Updater not yet installed."
+    puts "   This command will be available after the update system is configured."
+  end
+end
+
+def show_telemetry
+  begin
+    require_relative "../lib/telemetry"
+    telemetry = Telemetry.new
+    payload = telemetry.snapshot
+
+    puts "Telemetry payload (sent during update checks):"
+    puts JSON.pretty_generate(payload)
+    puts ""
+    puts "No user content is ever transmitted."
+  rescue LoadError
+    puts "⚠️  Telemetry module not yet installed."
+  end
+end
+
+main if __FILE__ == $PROGRAM_NAME

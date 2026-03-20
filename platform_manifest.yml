@@ -1,0 +1,119 @@
+# Historian Platform Manifest
+# Lookup table for hardware-variable components.
+# Used by historian-provision (factory) and historian-setup (customer).
+#
+# Each platform entry defines everything that differs between hardware targets.
+# The provisioner loads the matching platform section during factory provisioning.
+
+platforms:
+  jetson_orin_nano:
+    display_name: "NVIDIA Jetson Orin Nano (Dev Kit)"
+    arch: aarch64
+    ram_gb: 8
+    gpu_vram_shared: true
+
+    detection:
+      # Platform is identified by the presence of this file
+      tegra_release: /etc/nv_tegra_release
+      # Plus RAM check to distinguish from GX10 (also Tegra-based)
+      ram_max_gb: 16
+
+    os_flash:
+      method: nvidia_sdk_manager
+      jetpack_version: "6.1"
+      boot_media: microsd  # or nvme
+
+    system_packages:
+      - docker.io
+      - nvidia-container-toolkit
+      - git
+      - ruby
+      - ruby-bundler
+      - sqlite3
+      - curl
+      - htop
+      - openssl
+      - jq
+
+    nvidia:
+      runtime: nvidia
+      performance_mode: 0       # nvpmodel MAXN
+      lock_clocks: true         # jetson_clocks
+
+    directories:
+      data_root: /data/historian
+      logs_root: /logs/historian
+      subdirs:
+        - vault
+        - database/sqlite
+        - database/chroma
+        - database/redis
+        - models
+        - ollama
+        - soundtrack
+        - app-ssl
+
+    docker:
+      compose_file: prod/compose.registry.yml
+
+    ollama:
+      keep_alive: 300             # Unload after 5min — only 8GB RAM
+      max_loaded_models: 1        # Can only fit one model at a time
+      gpu_overhead: 268435456     # 256MB overhead (constrained)
+      models:
+        - "llama3.2:3b"
+
+  gx10:
+    display_name: "Asus Ascent GX10"
+    arch: aarch64
+    ram_gb: 128
+    gpu_vram_shared: true
+
+    detection:
+      tegra_release: /etc/nv_tegra_release
+      # GX10 has 128GB RAM — distinguished from Jetson by RAM threshold
+      ram_min_gb: 64
+
+    os_flash:
+      method: preinstalled        # GX10 ships with Ubuntu 24.04
+
+    system_packages:
+      - docker.io
+      - nvidia-container-toolkit
+      - git
+      - ruby
+      - ruby-bundler
+      - sqlite3
+      - curl
+      - htop
+      - openssl
+      - jq
+
+    nvidia:
+      runtime: nvidia
+      performance_mode: 0         # nvpmodel MAXN
+      lock_clocks: true           # jetson_clocks
+
+    directories:
+      data_root: /data/historian
+      logs_root: /logs/historian
+      subdirs:
+        - vault
+        - database/sqlite
+        - database/chroma
+        - database/redis
+        - models
+        - ollama
+        - soundtrack
+        - app-ssl
+
+    docker:
+      compose_file: prod/compose.registry.yml
+
+    ollama:
+      keep_alive: -1              # Never unload — 128GB headroom
+      max_loaded_models: 3        # Keep 70B + secondary + FunctionGemma loaded
+      gpu_overhead: 1073741824    # 1GB overhead
+      models:
+        - "llama3.1:70b-instruct-q4_K_M"
+        - "qwen2.5:72b-instruct-q4_K_M"

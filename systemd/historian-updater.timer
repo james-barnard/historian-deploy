@@ -1,0 +1,17 @@
+[Unit]
+Description=Historian Update Check Timer
+Documentation=https://github.com/james-barnard/historian-deploy
+
+[Timer]
+# Check for updates every 4 hours
+OnBootSec=5min
+OnUnitActiveSec=4h
+
+# Randomize within a 30-minute window to avoid fleet thundering herd
+RandomizedDelaySec=1800
+
+# Persist timer across reboots
+Persistent=true
+
+[Install]
+WantedBy=timers.target

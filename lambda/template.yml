@@ -1,0 +1,251 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Historian Update Service — API Gateway + Lambdas + DynamoDB + S3
+  Manages device update check-ins, telemetry, signed release distribution,
+  and staged rollouts.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [production, staging]
+  S3BucketName:
+    Type: String
+    Default: historian-releases
+  FactorySecret:
+    Type: String
+    NoEcho: true
+    Description: Secret used during factory provisioning to register devices
+
+Globals:
+  Function:
+    Runtime: ruby3.3
+    Timeout: 30
+    MemorySize: 256
+    Environment:
+      Variables:
+        RELEASES_TABLE: !Ref ReleasesTable
+        DEVICES_TABLE: !Ref DevicesTable
+        S3_BUCKET: !Ref S3BucketName
+
+Resources:
+
+  # ──────────────────────────────────────────
+  # API Gateway
+  # ──────────────────────────────────────────
+
+  UpdateApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: historian-update-api
+      StageName: v1
+      Description: Historian device update API
+      EndpointConfiguration:
+        Type: REGIONAL
+
+  # ──────────────────────────────────────────
+  # Lambda: check-update
+  # ──────────────────────────────────────────
+
+  CheckUpdateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: historian-check-update
+      Description: Device check-in — verify token, log telemetry, return presigned URL
+      CodeUri: check_update/
+      Handler: handler.handler
+      Events:
+        CheckUpdate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref UpdateApi
+            Path: /check-update
+            Method: post
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DevicesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ReleasesTable
+        - S3ReadPolicy:
+            BucketName: !Ref S3BucketName
+
+  # ──────────────────────────────────────────
+  # Lambda: register-device
+  # ──────────────────────────────────────────
+
+  RegisterDeviceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: historian-register-device
+      Description: Factory provisioning — register device and generate token
+      CodeUri: register_device/
+      Handler: handler.handler
+      Environment:
+        Variables:
+          FACTORY_SECRET: !Ref FactorySecret
+      Events:
+        RegisterDevice:
+          Type: Api
+          Properties:
+            RestApiId: !Ref UpdateApi
+            Path: /register-device
+            Method: post
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DevicesTable
+
+  # ──────────────────────────────────────────
+  # Lambda: register-release
+  # ──────────────────────────────────────────
+
+  RegisterReleaseFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: historian-register-release
+      Description: S3 event trigger — validate release, register in DynamoDB at 0% rollout
+      CodeUri: register_release/
+      Handler: handler.handler
+      Timeout: 120
+      MemorySize: 512
+      Events:
+        NewRelease:
+          Type: S3
+          Properties:
+            Bucket: !Ref ReleasesBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: .tar.gz
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReleasesTable
+        - S3ReadPolicy:
+            BucketName: !Ref S3BucketName
+
+  # ──────────────────────────────────────────
+  # S3: Release artifacts (private)
+  # ──────────────────────────────────────────
+
+  ReleasesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref S3BucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: CleanOldVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 90
+      Tags:
+        - Key: Project
+          Value: historian
+
+  # ──────────────────────────────────────────
+  # DynamoDB: Releases
+  # ──────────────────────────────────────────
+
+  ReleasesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: historian-releases
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: version
+          AttributeType: S
+      KeySchema:
+        - AttributeName: version
+          KeyType: HASH
+      Tags:
+        - Key: Project
+          Value: historian
+
+  # ──────────────────────────────────────────
+  # DynamoDB: Devices (registry + telemetry)
+  # ──────────────────────────────────────────
+
+  DevicesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: historian-devices
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: device_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: device_id
+          KeyType: HASH
+      Tags:
+        - Key: Project
+          Value: historian
+
+  # ──────────────────────────────────────────
+  # IAM: Release uploader (for dev Mac)
+  # ──────────────────────────────────────────
+
+  ReleaseUploaderUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: historian-release-uploader
+      Policies:
+        - PolicyName: UploadReleases
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::${S3BucketName}"
+                  - !Sub "arn:aws:s3:::${S3BucketName}/*"
+        - PolicyName: ManageRollouts
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                  - dynamodb:GetItem
+                  - dynamodb:Scan
+                Resource: !GetAtt ReleasesTable.Arn
+
+  ReleaseUploaderAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref ReleaseUploaderUser
+
+Outputs:
+  ApiEndpoint:
+    Description: Update API endpoint
+    Value: !Sub "https://${UpdateApi}.execute-api.${AWS::Region}.amazonaws.com/v1/check-update"
+
+  ReleasesBucketName:
+    Description: S3 bucket for release artifacts
+    Value: !Ref ReleasesBucket
+
+  ReleasesTableName:
+    Description: DynamoDB releases table
+    Value: !Ref ReleasesTable
+
+  DevicesTableName:
+    Description: DynamoDB devices table
+    Value: !Ref DevicesTable
+
+  UploaderAccessKeyId:
+    Description: Access key ID for release uploader (store securely)
+    Value: !Ref ReleaseUploaderAccessKey
+
+  UploaderSecretKey:
+    Description: Secret access key for release uploader (store securely)
+    Value: !GetAtt ReleaseUploaderAccessKey.SecretAccessKey

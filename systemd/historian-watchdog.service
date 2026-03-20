@@ -1,0 +1,25 @@
+[Unit]
+Description=Historian Container Watchdog
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+Documentation=https://github.com/james-barnard/historian-deploy
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ruby /opt/historian/lib/watchdog_daemon.rb
+Restart=always
+RestartSec=10
+User=root
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=historian-watchdog
+
+# Environment
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# Watchdog is critical — always restart
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Install]
+WantedBy=multi-user.target

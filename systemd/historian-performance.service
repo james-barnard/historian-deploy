@@ -1,0 +1,16 @@
+[Unit]
+Description=Historian GX10 Performance Tuning (prod)
+Documentation=file:///home/poobah/projects/historian/docs/deployment/GX10_OLLAMA_OPTIMIZATION.md
+After=network.target
+Before=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Use absolute path that will be replaced during installation
+ExecStart=/home/poobah/projects/historian/prod/gx10-performance.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
