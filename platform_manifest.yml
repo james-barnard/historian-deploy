@@ -7,7 +7,7 @@
 
 platforms:
   jetson_orin_nano:
-    display_name: "NVIDIA Jetson Orin Nano (Dev Kit)"
+    display_name: "NVIDIA Jetson Orin Nano"
     arch: aarch64
     ram_gb: 8
     gpu_vram_shared: true
@@ -116,4 +116,3 @@ platforms:
       gpu_overhead: 1073741824    # 1GB overhead
       models:
         - "llama3.1:70b-instruct-q4_K_M"
-        - "qwen2.5:72b-instruct-q4_K_M"

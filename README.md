@@ -68,30 +68,27 @@ register-release Lambda
 ### Prerequisites
 
 - Freshly flashed Jetson/GX10 with JetPack (see `docs/flash_guide.md`)
-- This repo on a factory workstation (Mac or Linux)
-- Network connectivity to the device (USB or LAN)
+- Network connectivity to the device (SSH + internet for GitHub/Docker)
+- `FACTORY_SECRET` env var for device registration
 
 ### Steps
 
 ```bash
-# 1. Clone the deploy repo on the factory workstation
+# 1. SSH into the device
+ssh historian@<DEVICE_IP>
+
+# 2. Clone the deploy repo
 git clone https://github.com/james-barnard/historian-deploy.git
 cd historian-deploy
 
-# 2. Copy to the device
-scp -r ./ historian@<DEVICE_IP>:~/historian-deploy/
-
-# 3. SSH into the device
-ssh historian@<DEVICE_IP>
-
-# 4. Run the provisioner
-cd ~/historian-deploy
-sudo ./bin/historian-provision
+# 3. Run the provisioner
+sudo FACTORY_SECRET=your_secret bin/historian-provision
 
 # This runs 6 phases:
 #   Phase 1: VALIDATE   — arch, disk, Docker
 #   Phase 2: INSTALL    — system packages, NVIDIA runtime, Ruby deps
-#   Phase 3: CONFIGURE  — rsync to /opt/historian, directories, SSL, systemd services, hist CLI
+#   Phase 3: CONFIGURE  — rsync to /opt/historian, directories, SSL,
+#                         systemd services, hist CLI, device registration
 #   Phase 4: DEPLOY     — pull images, start containers, pull Ollama models
 #   Phase 5: SMOKE TEST — verify all 7 service endpoints
 #   Phase 6: SEAL       — shut down services for shipping
@@ -100,11 +97,11 @@ sudo ./bin/historian-provision
 ### Provisioner Options
 
 ```bash
-sudo ./bin/historian-provision                    # Full auto-detect
-sudo ./bin/historian-provision --platform gx10    # Force platform
-sudo ./bin/historian-provision --dry-run           # Preview without changes
-sudo ./bin/historian-provision --skip-deploy       # Install only, no containers
-sudo ./bin/historian-provision --skip-seal         # Leave services running
+sudo bin/historian-provision                    # Full auto-detect
+sudo bin/historian-provision --platform gx10    # Force platform
+sudo bin/historian-provision --dry-run           # Preview without changes
+sudo bin/historian-provision --skip-deploy       # Install only, no containers
+sudo bin/historian-provision --skip-seal         # Leave services running
 ```
 
 ---
@@ -207,7 +204,10 @@ Inside the tarball, `update_manifest.yml` controls validation:
 version: "1.4.0"
 min_version: "1.3.0"         # Devices below this must update incrementally
 built_at: "2026-03-20T18:00:00Z"
-git_commit: "a1b2c3d"
+deploy_repo_commit: "d8c7fad"
+source_repo:
+  commit: "e49a0aef"
+  tag: "v1.4.0"
 hooks:
   pre_deploy: null            # Optional: script to run before deploy
   post_deploy: null           # Optional: script to run after deploy
@@ -258,8 +258,9 @@ cd lambda && sam build && sam deploy
 
 | Resource | Type | Purpose |
 |---|---|---|
-| `historian-update-api` | API Gateway | `POST /v1/check-update` |
+| `historian-update-api` | API Gateway | `POST /v1/check-update`, `/v1/register-device` |
 | `historian-check-update` | Lambda (Ruby 3.3) | Device check-in, presigned URL |
+| `historian-register-device` | Lambda (Ruby 3.3) | Factory provisioning, idempotent |
 | `historian-register-release` | Lambda (Ruby 3.3) | S3 event → DynamoDB |
 | `historian-releases` | S3 Bucket | Signed tarballs |
 | `historian-releases` | DynamoDB | Release registry + rollout % |
