@@ -54,7 +54,7 @@ platforms:
         - app-ssl
 
     docker:
-      compose_file: prod/compose.registry.yml
+      compose_file: compose.registry.yml
 
     ollama:
       keep_alive: 300             # Unload after 5min — only 8GB RAM
@@ -108,7 +108,7 @@ platforms:
         - app-ssl
 
     docker:
-      compose_file: prod/compose.registry.yml
+      compose_file: compose.registry.yml
 
     ollama:
       keep_alive: -1              # Never unload — 128GB headroom
