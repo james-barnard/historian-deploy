@@ -8,7 +8,7 @@ require "uri"
 require "securerandom"
 
 class Provisioner
-  MANIFEST_PATH = File.join(File.dirname(File.expand_path(__FILE__), 2), "platform_manifest.yml")
+  MANIFEST_PATH = File.join(File.dirname(File.dirname(File.expand_path(__FILE__))), "platform_manifest.yml")
   INSTALL_ROOT = "/opt/historian"
   UPDATE_API = "https://635co2fp79.execute-api.us-east-1.amazonaws.com/v1"
   MIN_DISK_GB = 50
@@ -196,7 +196,7 @@ class Provisioner
   end
 
   def install_ruby_deps
-    prod_dir = File.dirname(File.expand_path(__FILE__), 2)
+    prod_dir = File.dirname(File.dirname(File.expand_path(__FILE__)))
     gemfile = File.join(prod_dir, "Gemfile")
 
     if File.exist?(gemfile)
@@ -278,7 +278,7 @@ class Provisioner
   end
 
   def install_to_opt
-    source_dir = File.dirname(File.expand_path(__FILE__), 2)
+    source_dir = File.dirname(File.dirname(File.expand_path(__FILE__)))
     step "Installing deploy repo to #{INSTALL_ROOT}"
 
     if Dir.exist?(INSTALL_ROOT)

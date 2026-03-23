@@ -19,7 +19,7 @@ require "open3"
 #
 class ReleasePackager
   SIGNING_KEY_PATH = File.expand_path("~/.historian/update-signing.key")
-  DEPLOY_ROOT = File.dirname(File.expand_path(__FILE__), 2)
+  DEPLOY_ROOT = File.dirname(File.dirname(File.expand_path(__FILE__)))
   DEV_REPO = File.join(File.dirname(DEPLOY_ROOT), "historian")
   BUILD_DIR = File.join(DEPLOY_ROOT, "tmp", "release")
 

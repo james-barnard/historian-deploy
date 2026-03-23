@@ -13,8 +13,8 @@ require "socket"
 #   No hidden fields. What you see is what gets sent.
 #
 class Telemetry
-  VERSION_FILE = File.join(File.dirname(File.expand_path(__FILE__), 2), "VERSION")
-  MANIFEST_FILE = File.join(File.dirname(File.expand_path(__FILE__), 2), "platform_manifest.yml")
+  VERSION_FILE = File.join(File.dirname(File.dirname(File.expand_path(__FILE__))), "VERSION")
+  MANIFEST_FILE = File.join(File.dirname(File.dirname(File.expand_path(__FILE__))), "platform_manifest.yml")
   DEVICE_ID_FILE = "/opt/historian/.device_id"
 
   # Generate the health snapshot — this is the exact payload sent to the update API.

@@ -9,7 +9,7 @@ class ServiceManager
 
   def initialize(config_file = nil)
     # Use absolute path to services.yml in the prod directory
-    prod_dir = File.dirname(File.expand_path(__FILE__), 2)
+    prod_dir = File.dirname(File.dirname(File.expand_path(__FILE__)))
     @config_file = config_file || File.join(prod_dir, "services.yml")
     @config = load_config
     @services = {}
@@ -619,7 +619,7 @@ class ServiceManager
   end
 
   def get_current_version
-    version_file = File.join(File.dirname(File.expand_path(__FILE__), 2), "VERSION")
+    version_file = File.join(File.dirname(File.dirname(File.expand_path(__FILE__))), "VERSION")
     if File.exist?(version_file)
       File.read(version_file).strip
     else
@@ -2642,7 +2642,7 @@ class ServiceManager
   end
 
   def load_tts_config
-    prod_dir = File.dirname(File.expand_path(__FILE__), 2)
+    prod_dir = File.dirname(File.dirname(File.expand_path(__FILE__)))
 
     # Detect platform and load appropriate TTS config
     platform = detect_platform
@@ -2747,7 +2747,7 @@ class ServiceManager
       Process.setsid
 
       # Redirect output to log file
-      log_dir = File.join(File.dirname(__FILE__, 2), "logs")
+      log_dir = File.join(File.dirname(File.dirname(__FILE__)), "logs")
       FileUtils.mkdir_p(log_dir)
       log_file = File.join(log_dir, "watchdog.log")
 
@@ -2769,7 +2769,7 @@ class ServiceManager
 
     if Watchdog.running?
       puts "✅ Watchdog started successfully (PID: #{pid})"
-      puts "   Logs: #{File.join(File.dirname(__FILE__, 2), 'logs', 'watchdog.log')}"
+      puts "   Logs: #{File.join(File.dirname(File.dirname(__FILE__)), 'logs', 'watchdog.log')}"
       true
     else
       puts "❌ Failed to start watchdog"
