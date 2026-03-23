@@ -1960,8 +1960,8 @@ class ServiceManager
     if File.absolute_path?(compose_path)
       compose_path
     else
-      # Go up from prod/lib to project root
-      project_root = File.dirname(File.expand_path(__FILE__), 3)
+      # Go up from lib/ to repo root
+      project_root = File.dirname(File.dirname(File.expand_path(__FILE__)))
       File.join(project_root, compose_path)
     end
   end
@@ -2260,8 +2260,8 @@ class ServiceManager
   end
 
   def project_root
-    # Go up from prod/lib to project root
-    File.dirname(File.expand_path(__FILE__), 3)
+    # Go up from lib/ to repo root
+    File.dirname(File.dirname(File.expand_path(__FILE__)))
   end
 
   def show_rebuild_debug(service_name)
