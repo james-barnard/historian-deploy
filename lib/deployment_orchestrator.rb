@@ -338,8 +338,8 @@ class DeploymentOrchestrator
     puts "   Ollama API:      http://localhost:11434"
     puts ""
     puts "🔍 Next Steps:"
-    puts "   ./historian status    # Check service health"
-    puts "   ./historian logs app  # View application logs"
+    puts "   hist status    # Check service health"
+    puts "   hist logs app  # View application logs"
     puts ""
   end
 
@@ -352,7 +352,7 @@ class DeploymentOrchestrator
   end
 
   def load_prod_env_if_present
-    env_file = File.join(project_root, "prod", "prod.env")
+    env_file = File.join(project_root, "prod.env")
     return unless File.exist?(env_file)
 
     File.read(env_file).each_line do |line|
@@ -390,7 +390,7 @@ class DeploymentOrchestrator
   end
 
   def project_root
-    File.expand_path("../..", __dir__)
+    File.expand_path("..", __dir__)
   end
 
   def run_database_migrations
@@ -434,9 +434,9 @@ class DeploymentOrchestrator
       return
     end
 
-    service_file = File.join(project_root, "prod", "historian-performance.service")
-    performance_script = File.join(project_root, "prod", "gx10-performance.sh")
-    install_script = File.join(project_root, "prod", "scripts", "install_gx10_performance_service.sh")
+    service_file = File.join(project_root, "systemd", "historian-performance.service")
+    performance_script = File.join(project_root, "gx10-performance.sh")
+    install_script = File.join(project_root, "scripts", "install_gx10_performance_service.sh")
 
     # Check if service is already installed and running
     if system("systemctl list-unit-files | grep -q historian-performance.service 2>/dev/null")
@@ -495,7 +495,7 @@ class DeploymentOrchestrator
       return
     end
 
-    setup_script = File.join(project_root, "prod", "setup-ollama-optimized.sh")
+    setup_script = File.join(project_root, "scripts", "setup-ollama-optimized.sh")
 
     unless File.exist?(setup_script)
       puts "   ⚠️  Setup script not found: #{setup_script}"
