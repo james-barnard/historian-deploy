@@ -53,6 +53,7 @@ class Provisioner
     install_system_packages
     configure_docker_group
     configure_nvidia_runtime
+    docker_login_ghcr
     install_ruby_deps
 
     # Phase 3: Configure
@@ -193,6 +194,43 @@ class Provisioner
     run_cmd("nvidia-ctk runtime configure --runtime=docker")
     run_cmd("systemctl restart docker")
     step "NVIDIA runtime configured"
+  end
+
+  def docker_login_ghcr
+    # Check if already authenticated
+    docker_config = File.expand_path("~/.docker/config.json")
+    if File.exist?(docker_config)
+      config = JSON.parse(File.read(docker_config)) rescue {}
+      auths = config.dig("auths", "ghcr.io") || config.dig("credHelpers", "ghcr.io")
+      if auths
+        step "GHCR: already authenticated"
+        return
+      end
+    end
+
+    ghcr_token = ENV["GHCR_TOKEN"]
+    unless ghcr_token
+      abort "❌ GHCR_TOKEN not set — required to pull private container images.\n" \
+            "   Generate a GitHub PAT with read:packages scope and pass it:\n" \
+            "   sudo GHCR_TOKEN=ghp_xxx FACTORY_SECRET=xxx bin/historian-provision"
+    end
+
+    step "Authenticating with GHCR (ghcr.io)"
+
+    if @dry_run
+      step "[DRY RUN] Would log in to ghcr.io as james-barnard"
+      return
+    end
+
+    cmd = "echo #{Shellwords.escape(ghcr_token)} | docker login ghcr.io -u james-barnard --password-stdin 2>&1"
+    output, status = Open3.capture2e(cmd)
+
+    if status.success?
+      step "GHCR login successful"
+    else
+      abort "❌ GHCR login failed: #{output.strip}\n" \
+            "   Check your GHCR_TOKEN (needs read:packages scope)"
+    end
   end
 
   def install_ruby_deps
