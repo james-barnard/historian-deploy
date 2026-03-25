@@ -275,7 +275,6 @@ services:
       - redis
       - app
       - asr
-      - historian-tts
     networks:
       - historian-network
     logging:
@@ -295,6 +294,8 @@ services:
     container_name: historian-tts
     restart: unless-stopped
     runtime: nvidia
+    profiles:
+      - gx10
     ports:
       - "8001:8000"
     volumes:

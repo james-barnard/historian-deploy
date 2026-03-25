@@ -73,15 +73,16 @@ services:
     image: "ghcr.io/james-barnard/historian-audio-gateway:${REGISTRY_TAG:-latest}"
     ports: ["8446:8446"]
     health_check: "http://localhost:8446/health"
-    dependencies: ["app", "asr", "historian-tts"]
-    description: "WebSocket voice gateway with NeMo TTS"
+    dependencies: ["app", "asr"]
+    description: "WebSocket voice gateway (TTS via NeMo on GX10, Piper on Jetson)"
 
   historian-tts:
     image: "ghcr.io/james-barnard/historian-tts:${REGISTRY_TAG:-latest}"
     ports: ["8001:8000"]
     health_check: "http://localhost:8000/health"
     dependencies: []
-    description: "NeMo FastPitch + HiFi-GAN TTS for narration-quality speech"
+    platform: gx10
+    description: "NeMo FastPitch + HiFi-GAN TTS (GX10 only)"
 
 # Global configuration
 config:

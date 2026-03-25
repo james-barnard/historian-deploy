@@ -14,6 +14,7 @@ class DeploymentOrchestrator
   def deploy
     puts "🚀 Deploying Historian from deployment.lock"
     puts "=" * 50
+    puts "   Platform: #{gx10? ? 'GX10 (NeMo TTS enabled)' : 'Jetson (TTS skipped)'}"
     puts ""
 
     # Phase 1: Validate
@@ -106,9 +107,32 @@ class DeploymentOrchestrator
                             end
   end
 
+  # Compose command with profile flags based on detected platform
+  def compose_base_cmd
+    cmd = "#{docker_compose_cmd} -f #{@compose_file}"
+    cmd += " --profile gx10" if gx10?
+    cmd
+  end
+
+  # Detect GX10 platform: Tegra + 64GB+ RAM
+  def gx10?
+    return @is_gx10 if defined?(@is_gx10)
+
+    @is_gx10 = File.exist?("/etc/nv_tegra_release") &&
+               (total_ram_gb >= 64)
+  end
+
+  def total_ram_gb
+    meminfo = File.read("/proc/meminfo")
+    match = meminfo.match(/MemTotal:\s+(\d+)\s+kB/)
+    match ? (match[1].to_i / 1_048_576.0).round : 0
+  rescue StandardError
+    0
+  end
+
   def stop_all_services
     puts "🛑 Stopping all services..."
-    system("#{docker_compose_cmd} -f #{@compose_file} down 2>/dev/null")
+    system("#{compose_base_cmd} down 2>/dev/null")
     puts "   ✅ Services stopped"
     puts ""
   end
@@ -206,12 +230,12 @@ class DeploymentOrchestrator
     if stale_services.any?
       puts "   🔄 Detected stale containers: #{stale_services.join(', ')}"
       stale_services.each do |svc|
-        system("#{env_vars} #{docker_compose_cmd} -f #{@compose_file} up -d --force-recreate --no-deps #{svc} 2>&1")
+        system("#{env_vars} #{compose_base_cmd} up -d --force-recreate --no-deps #{svc} 2>&1")
       end
     end
 
     # Then do a normal 'up -d' to start/balance everything else
-    success = system("#{env_vars} #{docker_compose_cmd} -f #{@compose_file} up -d --remove-orphans 2>&1")
+    success = system("#{env_vars} #{compose_base_cmd} up -d --remove-orphans 2>&1")
 
     unless success
       puts "❌ Failed to start services"
@@ -234,7 +258,7 @@ class DeploymentOrchestrator
       next if %w[external unknown].include?(digest)
 
       # Get the running container's image digest
-      container_name = `#{docker_compose_cmd} -f #{@compose_file} ps -q #{service} 2>/dev/null`.strip
+      container_name = `#{compose_base_cmd} ps -q #{service} 2>/dev/null`.strip
       next if container_name.empty?
 
       actual_digest = get_running_digest(container_name)
@@ -260,7 +284,7 @@ class DeploymentOrchestrator
     puts ""
 
     # Check that containers are running
-    output = `#{docker_compose_cmd} -f #{@compose_file} ps --format json 2>/dev/null`
+    output = `#{compose_base_cmd} ps --format json 2>/dev/null`
     containers = output.split("\n").map do |line|
       JSON.parse(line)
     rescue StandardError
