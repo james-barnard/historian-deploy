@@ -26,6 +26,7 @@ platforms:
     system_packages:
       - docker.io
       - nvidia-container-toolkit
+      - build-essential
       - git
       - ruby
       - ruby-dev
@@ -82,6 +83,7 @@ platforms:
     system_packages:
       - docker.io
       - nvidia-container-toolkit
+      - build-essential
       - git
       - ruby
       - ruby-dev
