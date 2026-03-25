@@ -239,7 +239,8 @@ class Provisioner
 
     if File.exist?(gemfile)
       step "Installing Ruby dependencies for hist CLI"
-      run_cmd("cd #{Shellwords.escape(prod_dir)} && bundle install --quiet")
+      deploy_user = ENV["SUDO_USER"] || "historian"
+      run_cmd("su - #{deploy_user} -c 'cd #{Shellwords.escape(prod_dir)} && bundle install --quiet'")
     else
       warn_step "No Gemfile found in prod/ — skipping Ruby deps"
     end
@@ -358,12 +359,14 @@ class Provisioner
     run_cmd("systemctl enable historian-updater.timer")
     run_cmd("systemctl start historian-updater.timer")
 
-    # Enable and start performance tuning (if NVIDIA platform)
-    if manifest.dig("nvidia", "lock_clocks")
-      perf_script = File.join(INSTALL_ROOT, "gx10-performance.sh")
-      run_cmd("chmod +x #{Shellwords.escape(perf_script)}") if File.exist?(perf_script) || @dry_run
+    # Enable and start performance tuning (if script exists on this platform)
+    perf_script = File.join(INSTALL_ROOT, "gx10-performance.sh")
+    if File.exist?(perf_script)
+      run_cmd("chmod +x #{Shellwords.escape(perf_script)}")
       run_cmd("systemctl enable historian-performance.service")
       run_cmd("systemctl start historian-performance.service")
+    else
+      substep "Skipping performance service (gx10-performance.sh not found)"
     end
 
     step "Systemd services installed and enabled"
