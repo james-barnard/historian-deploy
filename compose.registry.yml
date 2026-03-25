@@ -173,6 +173,8 @@ services:
     container_name: historian-asr
     restart: unless-stopped
     runtime: nvidia
+    profiles:
+      - gx10
     ports:
       - "9001:9001"
     volumes:
@@ -182,6 +184,35 @@ services:
       - MODELS_DIR=/models
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    networks:
+      - historian-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  asr-whisper:
+    image: ghcr.io/james-barnard/historian-asr-whisper:${REGISTRY_TAG:-latest}
+    container_name: historian-asr
+    restart: unless-stopped
+    profiles:
+      - jetson
+    ports:
+      - "9001:9001"
+    volumes:
+      - /data/historian/models:/models
+      - /data/historian/vault:/vault:ro
+    environment:
+      - WHISPER_MODEL=small
+      - WHISPER_DEVICE=cpu
+      - WHISPER_COMPUTE=int8
     networks:
       - historian-network
     logging:

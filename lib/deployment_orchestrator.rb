@@ -14,7 +14,7 @@ class DeploymentOrchestrator
   def deploy
     puts "🚀 Deploying Historian from deployment.lock"
     puts "=" * 50
-    puts "   Platform: #{gx10? ? 'GX10 (NeMo TTS enabled)' : 'Jetson (TTS skipped)'}"
+    puts "   Platform: #{gx10? ? 'GX10 (NeMo ASR + TTS)' : 'Jetson (Whisper ASR, no TTS)'}"
     puts ""
 
     # Phase 1: Validate
@@ -110,8 +110,12 @@ class DeploymentOrchestrator
   # Compose command with profile flags based on detected platform
   def compose_base_cmd
     cmd = "#{docker_compose_cmd} -f #{@compose_file}"
-    cmd += " --profile gx10" if gx10?
+    cmd += " --profile #{platform_profile}"
     cmd
+  end
+
+  def platform_profile
+    gx10? ? "gx10" : "jetson"
   end
 
   # Detect GX10 platform: Tegra + 64GB+ RAM
