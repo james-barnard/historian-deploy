@@ -155,10 +155,10 @@ When Docker auto-creates host-mounted volumes, it creates them as `root`. The or
 
 ### Host-Level Service Installation
 
-The orchestrator installs systemd units and udev rules from the **historian source repo** (not `historian-deploy`). These files live in `~/historian/system/` and `~/historian/bin/` on the device:
+The orchestrator installs systemd units and udev rules from this repo's own `systemd/` and `bin/` directories:
 
-- **WiFi scan**: `historian-wifi-scan.path` + `.service` — triggered on-demand via file watch
-- **Watcher pairing**: `99-historian-watcher.rules` + `historian-pair@.service` — auto-pairs USB devices via udev
+- **WiFi scan**: `systemd/historian-wifi-scan.path` + `.service` + `bin/historian-wifi-scan` — triggered on-demand via file watch
+- **Watcher pairing**: `systemd/99-historian-watcher.rules` + `systemd/historian-pair@.service` + `bin/historian-pair-device` — auto-pairs USB devices via udev
 
 ---
 

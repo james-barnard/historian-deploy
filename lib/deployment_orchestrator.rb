@@ -427,14 +427,11 @@ class DeploymentOrchestrator
     puts "⚙️  Verifying system services..."
     puts ""
 
-    # --- Historian source (already on device via git pull) ---
-    historian_root = ENV.fetch("HISTORIAN_ROOT") { File.expand_path("~/historian") }
-
     # --- WiFi scan on-demand (all platforms) ---
-    install_wifi_scan_service(historian_root)
+    install_wifi_scan_service
 
     # --- Watcher USB pairing (all platforms) ---
-    install_watcher_pairing(historian_root)
+    install_watcher_pairing
 
     # --- GX10 performance tuning (Tegra only) ---
     unless File.exist?("/etc/nv_tegra_release")
@@ -445,7 +442,6 @@ class DeploymentOrchestrator
 
     service_file = File.join(project_root, "systemd", "historian-performance.service")
     performance_script = File.join(project_root, "gx10-performance.sh")
-    install_script = File.join(project_root, "scripts", "install_gx10_performance_service.sh")
 
     if system("systemctl list-unit-files | grep -q historian-performance.service 2>/dev/null")
       puts "   ✅ GX10 performance service is installed"
@@ -466,20 +462,12 @@ class DeploymentOrchestrator
     elsif File.exist?(service_file) && File.exist?(performance_script)
       puts "   ⚠️  GX10 performance service NOT installed"
       puts ""
-      puts "   🚨 PRODUCTION SETUP REQUIRED:"
-      puts "   Performance tuning requires root privileges and must be installed once."
-      puts ""
-      if File.exist?(install_script)
-        puts "   Run this command to install (requires sudo):"
-        puts "   $ sudo #{install_script}"
-      else
-        puts "   Install manually:"
-        puts "   $ sudo cp #{service_file} /etc/systemd/system/"
-        puts "   $ sudo chmod +x #{performance_script}"
-        puts "   $ sudo systemctl daemon-reload"
-        puts "   $ sudo systemctl enable historian-performance.service"
-        puts "   $ sudo systemctl start historian-performance.service"
-      end
+      puts "   Install manually:"
+      puts "   $ sudo cp #{service_file} /etc/systemd/system/"
+      puts "   $ sudo chmod +x #{performance_script}"
+      puts "   $ sudo systemctl daemon-reload"
+      puts "   $ sudo systemctl enable historian-performance.service"
+      puts "   $ sudo systemctl start historian-performance.service"
       puts ""
       puts "   After installation, the service will run automatically on boot."
       puts "   No user intervention will be needed for subsequent deployments."
@@ -489,14 +477,14 @@ class DeploymentOrchestrator
     puts ""
   end
 
-  def install_wifi_scan_service(historian_root)
-    system_dir = File.join(historian_root, "system")
-    path_unit = File.join(system_dir, "historian-wifi-scan.path")
-    service_unit = File.join(system_dir, "historian-wifi-scan.service")
-    scan_script = File.join(historian_root, "bin", "historian-wifi-scan")
+  def install_wifi_scan_service
+    systemd_dir = File.join(project_root, "systemd")
+    path_unit = File.join(systemd_dir, "historian-wifi-scan.path")
+    service_unit = File.join(systemd_dir, "historian-wifi-scan.service")
+    scan_script = File.join(project_root, "bin", "historian-wifi-scan")
 
     unless File.exist?(path_unit) && File.exist?(service_unit) && File.exist?(scan_script)
-      puts "   ℹ️  WiFi scan files not found in #{system_dir} — skipping"
+      puts "   ℹ️  WiFi scan files not found in #{systemd_dir} — skipping"
       return
     end
 
@@ -519,14 +507,14 @@ class DeploymentOrchestrator
     end
   end
 
-  def install_watcher_pairing(historian_root)
-    system_dir = File.join(historian_root, "system")
-    udev_rule = File.join(system_dir, "99-historian-watcher.rules")
-    service_unit = File.join(system_dir, "historian-pair@.service")
-    pairing_script = File.join(historian_root, "bin", "historian-pair-device")
+  def install_watcher_pairing
+    systemd_dir = File.join(project_root, "systemd")
+    udev_rule = File.join(systemd_dir, "99-historian-watcher.rules")
+    service_unit = File.join(systemd_dir, "historian-pair@.service")
+    pairing_script = File.join(project_root, "bin", "historian-pair-device")
 
     unless File.exist?(udev_rule) && File.exist?(service_unit) && File.exist?(pairing_script)
-      puts "   ℹ️  Watcher pairing files not found in #{system_dir} — skipping"
+      puts "   ℹ️  Watcher pairing files not found in #{systemd_dir} — skipping"
       return
     end
 

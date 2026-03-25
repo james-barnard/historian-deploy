@@ -1,0 +1,27 @@
+# Historian Watcher USB Pairing Service (template unit)
+#
+# Triggered by udev rule when a Watcher is plugged into USB.
+# %I is the device name (e.g., ttyACM0), passed by udev via %k.
+#
+# Install: sudo cp historian-pair@.service /etc/systemd/system/
+#          sudo systemctl daemon-reload
+
+[Unit]
+Description=Pair Watcher on /dev/%I
+After=historian.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/historian/bin/historian-pair-device /dev/%I
+User=historian
+Group=dialout
+TimeoutStartSec=60
+
+# Environment for the pairing script
+Environment=HISTORIAN_ROOT=/opt/historian
+Environment=HISTORIAN_DB=/data/historian/historian.db
+Environment=HISTORIAN_ID=H-gx10-00a1
+Environment=HISTORIAN_PORT=8446
+
+StandardOutput=journal
+StandardError=journal
