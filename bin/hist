@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hist — Historian deployment CLI (pure shell, no Ruby required)
+# hist — Historian deployment CLI
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -12,7 +12,6 @@ COMPOSE_FILE="$DEPLOY_ROOT/compose.registry.yml"
 # Helpers
 # ---------------------------------------------------------------------------
 
-# Read a value from deployment.lock (simple YAML — top-level or image fields)
 lock_val() {
   grep -E "^${1}:" "$LOCK_FILE" 2>/dev/null | head -1 | sed "s/^${1}: *//" | tr -d "'"
 }
@@ -22,7 +21,6 @@ lock_image_val() {
   awk "/^  ${service}:/{found=1;next} /^  [^ ]/{found=0} found && /    ${field}:/{print \$2; exit}" "$LOCK_FILE" | tr -d "'"
 }
 
-# Detect platform (jetson vs gx10)
 detect_platform() {
   if [ -f /etc/nv_tegra_release ] || grep -qi "tegra\|jetson" /proc/device-tree/model 2>/dev/null; then
     echo "jetson"
@@ -31,23 +29,13 @@ detect_platform() {
   fi
 }
 
-compose_cmd() {
-  local platform
-  platform="$(detect_platform)"
-  echo "REGISTRY_TAG=$(lock_val version) docker compose -f $COMPOSE_FILE --profile $platform"
-}
-
 # ---------------------------------------------------------------------------
-# Commands
+# Deploy
 # ---------------------------------------------------------------------------
 
 cmd_deploy() {
   local version platform
 
-  echo "🚀 Deploying Historian from deployment.lock"
-  echo "=================================================="
-
-  # Validate lock file
   if [ ! -f "$LOCK_FILE" ]; then
     echo "❌ deployment.lock not found at $LOCK_FILE"
     exit 1
@@ -55,217 +43,107 @@ cmd_deploy() {
 
   version="$(lock_val version)"
   platform="$(detect_platform)"
+
+  echo "🚀 Deploying Historian"
+  echo "=================================================="
   echo "   Platform: $platform"
   echo "   Version:  $version"
   echo "   Commit:   $(lock_val git_commit)"
   echo ""
 
-  # GHCR auth
-  ghcr_auth
+  # Auth
+  if [ -f "$PAT_FILE" ]; then
+    if [ -f ~/.docker/config.json ] && grep -q "ghcr.io" ~/.docker/config.json 2>/dev/null; then
+      echo "🔑 GHCR: already authenticated"
+    else
+      echo "🔑 Authenticating with GHCR..."
+      cat "$PAT_FILE" | docker login ghcr.io -u james-barnard --password-stdin 2>&1 | sed 's/^/   /'
+    fi
+  else
+    echo "   ⚠️  No .pat file — pulls may fail for private images"
+  fi
+  echo ""
 
   # Pull images
-  pull_images "$version" "$platform"
-
-  # Clean slate + start
-  start_services "$platform" "$version"
-
-  # Run migrations (inside app container)
-  run_migrations
-
-  echo ""
-  echo "✅ Deployment complete!"
-  echo "🌐 Web: https://localhost:8443"
-  echo ""
-}
-
-ghcr_auth() {
-  # Already logged in?
-  if [ -f ~/.docker/config.json ] && grep -q "ghcr.io" ~/.docker/config.json 2>/dev/null; then
-    echo "🔑 GHCR: already authenticated"
-    return
-  fi
-
-  if [ ! -f "$PAT_FILE" ]; then
-    echo "   ⚠️  No .pat file — GHCR pulls may fail"
-    return
-  fi
-
-  echo "🔑 Authenticating with GHCR..."
-  cat "$PAT_FILE" | docker login ghcr.io -u james-barnard --password-stdin 2>&1 | sed 's/^/   /'
-}
-
-pull_images() {
-  local version="$1" platform="$2"
-  echo ""
   echo "📥 Pulling images..."
-  echo ""
-
-  # Services gated to specific profiles
   local gx10_only="asr historian-tts"
   local jetson_only="asr-whisper"
 
-  # Read services from lock file
   for service in $(grep -E '^  [a-z]' "$LOCK_FILE" | sed 's/:.*//' | tr -d ' '); do
     local image digest
-
     image="$(lock_image_val "$service" image)"
     digest="$(lock_image_val "$service" digest)"
-
     [ -z "$image" ] && continue
 
     # Skip external
-    if [ "$digest" = "external" ]; then
-      printf "   📦 %-18s skipping (external)\n" "$service"
-      continue
-    fi
+    [ "$digest" = "external" ] && { printf "   %-18s external\n" "$service"; continue; }
 
-    # Skip wrong-profile services
-    if echo "$gx10_only" | grep -qw "$service" && [ "$platform" != "gx10" ]; then
-      printf "   📦 %-18s skipping (gx10-only)\n" "$service"
-      continue
-    fi
-    if echo "$jetson_only" | grep -qw "$service" && [ "$platform" != "jetson" ]; then
-      printf "   📦 %-18s skipping (jetson-only)\n" "$service"
-      continue
-    fi
+    # Skip wrong-profile
+    echo "$gx10_only" | grep -qw "$service" && [ "$platform" != "gx10" ] && { printf "   %-18s skip (%s-only)\n" "$service" "gx10"; continue; }
+    echo "$jetson_only" | grep -qw "$service" && [ "$platform" != "jetson" ] && { printf "   %-18s skip (%s-only)\n" "$service" "jetson"; continue; }
 
-    printf "   📦 %-18s pulling..." "$service"
-
-    # Try digest first, fall back to tag
-    if [ "$digest" != "unknown" ]; then
-      local repo="${image%%:*}"
-      if docker pull "${repo}@${digest}" >/dev/null 2>&1; then
-        docker tag "${repo}@${digest}" "$image" 2>/dev/null
-        echo " ✅"
-        continue
-      fi
-    fi
-
-    # Fall back to tag
-    if docker pull "$image" >/dev/null 2>&1; then
+    printf "   %-18s pulling..." "$service"
+    if [ "$digest" != "unknown" ] && docker pull "${image%%:*}@${digest}" >/dev/null 2>&1; then
+      docker tag "${image%%:*}@${digest}" "$image" 2>/dev/null
+      echo " ✅"
+    elif docker pull "$image" >/dev/null 2>&1; then
       echo " ✅"
     else
-      echo " ⚠️ failed"
+      echo " ⚠️"
     fi
   done
   echo ""
-}
 
-start_services() {
-  local platform="$1" version="$2"
-  echo "🚀 Starting services..."
-  echo ""
-
-  # Clean slate: kill all historian containers
-  echo "   🧹 Stopping existing containers..."
+  # Clean slate + start
+  echo "🧹 Cleaning up..."
   docker ps -a --filter name=historian- --format '{{.Names}}' | xargs -r docker rm -f 2>/dev/null || true
-  REGISTRY_TAG="$version" docker compose -f "$COMPOSE_FILE" --profile "$platform" down --remove-orphans 2>&1 | sed 's/^/   /' || true
+  REGISTRY_TAG="$version" docker compose -f "$COMPOSE_FILE" --profile "$platform" down --remove-orphans 2>/dev/null || true
   docker network prune -f >/dev/null 2>&1 || true
 
-  # Bring up
-  echo "   🚀 Starting..."
-  if REGISTRY_TAG="$version" docker compose -f "$COMPOSE_FILE" --profile "$platform" up -d 2>&1 | sed 's/^/   /'; then
-    echo "   ✅ Services started"
-  else
-    echo "   ❌ Failed to start services"
-    exit 1
-  fi
+  echo "🚀 Starting services..."
+  REGISTRY_TAG="$version" docker compose -f "$COMPOSE_FILE" --profile "$platform" up -d 2>&1 | sed 's/^/   /'
+
+  # Migrations
   echo ""
-}
-
-run_migrations() {
-  echo "🗄️  Running database migrations..."
-
-  # Wait for app container (up to 30s)
+  echo "🗄️  Running migrations..."
   local i=0
   while [ $i -lt 30 ]; do
-    if docker ps --format '{{.Names}}' | grep -q "^historian-app$"; then
-      break
-    fi
-    sleep 1
-    i=$((i + 1))
+    docker ps --format '{{.Names}}' | grep -q "^historian-app$" && break
+    sleep 1; i=$((i + 1))
   done
-
-  if ! docker ps --format '{{.Names}}' | grep -q "^historian-app$"; then
-    echo "   ⚠️  historian-app not running — skipping migrations"
-    return
-  fi
-
-  # Wait a moment for the container to initialize
   sleep 3
 
-  if docker exec historian-app bundle exec ruby -e \
-    "require_relative '/app/lib/db'; Db.connect!; require_relative '/app/lib/db_migrator'; DbMigrator.migrate!" 2>&1 | sed 's/^/   /'; then
-    echo "   ✅ Migrations complete"
+  if docker ps --format '{{.Names}}' | grep -q "^historian-app$"; then
+    docker exec historian-app bundle exec ruby -e \
+      "require_relative '/app/lib/db'; Db.connect!; require_relative '/app/lib/db_migrator'; DbMigrator.migrate!" 2>&1 | sed 's/^/   /' || true
   else
-    echo "   ⚠️  Migration failed (app will self-heal on restart)"
+    echo "   ⚠️  app not running — will self-heal on restart"
   fi
+
+  echo ""
+  echo "✅ Deploy complete"
+  cmd_status
 }
+
+# ---------------------------------------------------------------------------
+# Status
+# ---------------------------------------------------------------------------
 
 cmd_status() {
-  echo "📊 Historian Service Status"
-  echo "==========================="
+  echo ""
+  echo "📊 Services"
+  echo "==========="
   docker ps --filter name=historian- --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null
-}
-
-cmd_logs() {
-  local service="${1:-}"
-  if [ -z "$service" ]; then
-    echo "Usage: hist logs <service>"
-    echo "Services: app, sidekiq, audio-gateway, asr-whisper, embed, ollama, redis, chroma-db, app-proxy"
-    exit 1
-  fi
-  docker logs --tail 100 -f "historian-${service}" 2>&1
-}
-
-cmd_restart() {
-  local service="${1:-}"
-  if [ -z "$service" ]; then
-    echo "Restarting all historian services..."
-    docker ps --filter name=historian- --format '{{.Names}}' | xargs -r docker restart
-  else
-    echo "Restarting historian-${service}..."
-    docker restart "historian-${service}"
-  fi
-}
-
-cmd_stop() {
-  echo "Stopping all historian services..."
-  docker ps --filter name=historian- --format '{{.Names}}' | xargs -r docker stop
-}
-
-cmd_help() {
-  cat <<EOF
-hist — Historian deployment CLI
-
-Usage: hist <command> [args]
-
-Commands:
-  deploy              Deploy from deployment.lock
-  status              Show service status
-  logs <service>      Follow service logs
-  restart [service]   Restart service(s)
-  stop                Stop all services
-  help                Show this help
-
-Examples:
-  hist deploy
-  hist status
-  hist logs app
-  hist restart audio-gateway
-EOF
 }
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
-case "${1:-help}" in
-  deploy)   cmd_deploy ;;
-  status)   cmd_status ;;
-  logs)     cmd_logs "${2:-}" ;;
-  restart)  cmd_restart "${2:-}" ;;
-  stop)     cmd_stop ;;
-  help|-h)  cmd_help ;;
-  *)        echo "Unknown command: $1"; cmd_help; exit 1 ;;
+case "${1:-}" in
+  deploy)  cmd_deploy ;;
+  status)  cmd_status ;;
+  *)
+    echo "Usage: hist <deploy|status>"
+    ;;
 esac
