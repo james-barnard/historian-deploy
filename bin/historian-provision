@@ -3,8 +3,8 @@
 # Historian Factory Provisioner
 #
 # Takes a fresh, out-of-the-box hardware platform from bare metal
-# to a fully-loaded, smoke-tested Historian appliance — sealed
-# and ready for shipping to a customer.
+# to a fully-loaded, smoke-tested Historian appliance with services
+# running for bench testing.
 #
 # This is a FACTORY tool, not a customer tool.
 # Customer-side setup (network, owner identity, Watcher pairing)
@@ -17,7 +17,7 @@
 #   --platform PLATFORM   Override auto-detection (jetson_orin_nano, gx10)
 #   --dry-run             Show plan without executing
 #   --skip-deploy         Provision only, don't pull images or start services
-#   --skip-seal           Leave services running after smoke test
+#   --seal                Shut down services after smoke test (for shipping)
 #   --help                Show this help
 
 # Find the prod directory relative to this script
@@ -34,7 +34,7 @@ def show_usage
     Historian Factory Provisioner
 
     Takes a fresh hardware platform from bare metal to a smoke-tested
-    Historian appliance, sealed and ready for shipping.
+    Historian appliance with services running for bench testing.
 
     Usage: #{$PROGRAM_NAME} [OPTIONS]
 
@@ -42,7 +42,7 @@ def show_usage
       --platform PLATFORM   Override auto-detection (jetson_orin_nano, gx10)
       --dry-run             Show plan without executing anything
       --skip-deploy         Provision system only, skip image pull and services
-      --skip-seal           Leave services running after smoke test (for debugging)
+      --seal                Shut down services after smoke test (for shipping)
       --help                Show this help
 
     Supported platforms:
@@ -53,7 +53,7 @@ def show_usage
       sudo #{$PROGRAM_NAME}                          # Auto-detect and provision
       sudo #{$PROGRAM_NAME} --platform jetson_orin_nano  # Force Jetson platform
       sudo #{$PROGRAM_NAME} --dry-run                # Preview without changes
-      sudo #{$PROGRAM_NAME} --skip-seal              # Keep services running
+      sudo #{$PROGRAM_NAME} --seal                   # Seal for shipping
   USAGE
 end
 
@@ -62,7 +62,7 @@ def parse_args(args)
     platform: nil,
     dry_run: false,
     skip_deploy: false,
-    skip_seal: false,
+    skip_seal: true,
   }
 
   i = 0
@@ -75,8 +75,8 @@ def parse_args(args)
       options[:dry_run] = true
     when "--skip-deploy"
       options[:skip_deploy] = true
-    when "--skip-seal"
-      options[:skip_seal] = true
+    when "--seal"
+      options[:skip_seal] = false
     when "--help", "-h"
       show_usage
       exit 0

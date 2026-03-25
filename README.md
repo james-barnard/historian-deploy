@@ -45,7 +45,7 @@ sudo bin/historian-provision                    # Full auto-detect
 sudo bin/historian-provision --platform gx10    # Force platform
 sudo bin/historian-provision --dry-run           # Preview without changes
 sudo bin/historian-provision --skip-deploy       # Install only, no containers
-sudo bin/historian-provision --skip-seal         # Leave services running
+sudo bin/historian-provision --seal              # Shut down services after (for shipping)
 ```
 
 ---
