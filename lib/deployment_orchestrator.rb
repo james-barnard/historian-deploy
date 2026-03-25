@@ -148,6 +148,31 @@ class DeploymentOrchestrator
     "asr-whisper" => "jetson",
   }.freeze
 
+  # Container names that belong to each profile (for cleanup)
+  PROFILE_CONTAINERS = {
+    "gx10" => %w[historian-asr historian-tts],
+    "jetson" => %w[historian-asr-whisper],
+  }.freeze
+
+  # Remove containers from profiles that are NOT active on this platform.
+  # Ensures idempotent provisioning when switching between platforms or
+  # re-provisioning after a profile change.
+  def cleanup_stale_profile_containers
+    active = platform_profile
+    stale_containers = PROFILE_CONTAINERS
+      .reject { |profile, _| profile == active }
+      .values.flatten
+
+    stale_containers.each do |name|
+      # Check if container exists (running or stopped)
+      exists = `docker ps -a --filter name=^/#{name}$ --format '{{.Names}}' 2>/dev/null`.strip
+      next if exists.empty?
+
+      puts "   🧹 Removing stale container: #{name} (wrong profile)"
+      system("docker rm -f #{name} 2>/dev/null")
+    end
+  end
+
   def pull_images_from_lock
     puts "📥 Pulling images from registry (parallel)..."
     puts ""
@@ -242,6 +267,9 @@ class DeploymentOrchestrator
     puts ""
 
     env_vars = build_environment_string
+
+    # Clean up containers from the opposite platform profile
+    cleanup_stale_profile_containers
 
     # Detect services whose images have changed (same tag, different digest)
     stale_services = detect_stale_services
