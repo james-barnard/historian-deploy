@@ -28,8 +28,10 @@ platforms:
       - nvidia-container-toolkit
       - git
       - ruby
+      - ruby-dev
       - ruby-bundler
       - sqlite3
+      - libsqlite3-dev
       - curl
       - htop
       - openssl
@@ -82,8 +84,10 @@ platforms:
       - nvidia-container-toolkit
       - git
       - ruby
+      - ruby-dev
       - ruby-bundler
       - sqlite3
+      - libsqlite3-dev
       - curl
       - htop
       - openssl
