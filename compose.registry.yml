@@ -198,7 +198,7 @@ services:
 
   asr-whisper:
     image: ghcr.io/james-barnard/historian-asr-whisper:${REGISTRY_TAG:-latest}
-    container_name: historian-asr
+    container_name: historian-asr-whisper
     restart: unless-stopped
     profiles:
       - jetson
