@@ -240,7 +240,8 @@ class Provisioner
     if File.exist?(gemfile)
       step "Installing Ruby dependencies for hist CLI"
       deploy_user = ENV["SUDO_USER"] || "historian"
-      run_cmd("su - #{deploy_user} -c 'cd #{Shellwords.escape(prod_dir)} && bundle install --quiet'")
+      # Install gems to vendor/bundle (no root needed, self-contained)
+      run_cmd("su - #{deploy_user} -c 'cd #{Shellwords.escape(prod_dir)} && bundle config set --local path vendor/bundle && bundle install --quiet'")
     else
       warn_step "No Gemfile found in prod/ — skipping Ruby deps"
     end
