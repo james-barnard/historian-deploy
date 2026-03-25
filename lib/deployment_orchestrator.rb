@@ -23,7 +23,10 @@ class DeploymentOrchestrator
     # Phase 2: Show deployment plan
     show_deployment_plan
 
-    # Phase 3: Pull exact images (PARALLEL)
+    # Phase 3: Authenticate with GHCR
+    ensure_ghcr_auth
+
+    # Phase 4: Pull exact images (PARALLEL)
     pull_images_from_lock
 
     # Phase 4: Setup data directories (permissions)
@@ -430,6 +433,31 @@ class DeploymentOrchestrator
 
   def project_root
     File.expand_path("..", __dir__)
+  end
+
+  def ensure_ghcr_auth
+    # Check if already authenticated
+    docker_config = File.expand_path("~/.docker/config.json")
+    if File.exist?(docker_config) && File.read(docker_config).include?("ghcr.io")
+      puts "🔑 GHCR authentication: already logged in"
+      return
+    end
+
+    # Read PAT from .pat file
+    pat_file = File.join(project_root, ".pat")
+    unless File.exist?(pat_file)
+      puts "   ⚠️  No .pat file found — GHCR pulls may fail for private images"
+      return
+    end
+
+    pat = File.read(pat_file).strip
+    puts "🔑 Authenticating with GHCR..."
+    success = system("echo #{pat} | docker login ghcr.io -u james-barnard --password-stdin 2>&1")
+    if success
+      puts "   ✅ GHCR authentication successful"
+    else
+      puts "   ⚠️  GHCR authentication failed — pulls may fail"
+    end
   end
 
   def run_database_migrations

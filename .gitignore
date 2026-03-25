@@ -20,3 +20,6 @@ update_manifest.yml
 # Temp
 tmp/
 lambda/.aws-sam/
+
+# Secrets
+.pat
