@@ -1,8 +1,0 @@
-# Historian Watcher USB Pairing Auto-Detect
-# Triggers pairing daemon when an ESP32-S3 USB Serial/JTAG device is plugged in.
-#
-# VID 303a = Espressif Systems
-# PID 1001 = ESP32-S3 USB Serial/JTAG
-
-ACTION=="add", SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", \
-  TAG+="systemd", ENV{SYSTEMD_WANTS}="historian-pair@%k.service"

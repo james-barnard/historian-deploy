@@ -1,9 +1,0 @@
-# Run WiFi scan on demand (triggered by systemd path unit)
-
-[Unit]
-Description=Scan WiFi networks for Historian admin console
-
-[Service]
-Type=oneshot
-ExecStart=/opt/historian/bin/historian-wifi-scan
-ExecStartPost=/bin/rm -f /data/historian/database/sqlite/.wifi_scan_trigger
