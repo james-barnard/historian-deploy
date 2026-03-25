@@ -56,7 +56,6 @@ services:
       - REDIS_URL=redis://redis:6379
       - RACK_ENV=production
       - LOG_LEVEL=${HIST_LOG_LEVEL:-INFO}
-      - OWNER_NAME=James Barnard
       # Model selection now handled by ModelConfig (config/models.yml)
       # Platform auto-detected: gx10 (prod)
       # Override with: HISTORIAN_PLATFORM, CONTEXT_PASS_MODEL, EVENTS_PASS_MODEL
@@ -122,7 +121,6 @@ services:
       - FUNCTION_GEMMA_MODEL=functiongemma:270m
       - REDIS_URL=redis://redis:6379
       - RACK_ENV=production
-      - OWNER_NAME=James Barnard
       # Model selection now handled by ModelConfig (config/models.yml)
       # Platform auto-detected: gx10 (prod)
       # Override with: HISTORIAN_PLATFORM, CONTEXT_PASS_MODEL, EVENTS_PASS_MODEL
