@@ -243,8 +243,9 @@ class DeploymentOrchestrator
 
     env_vars = build_environment_string
 
-    # Clean slate: stop and remove all existing containers
+    # Clean slate: remove ALL historian containers (including from other profiles)
     puts "   🧹 Stopping existing containers..."
+    system("docker ps -a --filter name=historian- --format '{{.Names}}' | xargs -r docker rm -f 2>/dev/null")
     system("#{env_vars} #{compose_base_cmd} down --remove-orphans 2>&1")
 
     # Bring everything up fresh
