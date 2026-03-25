@@ -22,7 +22,8 @@ hist-release                    S3 (private)                 historian-updater.t
                                   ↓ check rollout %          verify SHA256
                                   └─→ presigned URL          extract → validate → swap
                                                              hist deploy
-register-release Lambda                                      
+
+register-release Lambda                                     
   ← S3 event on .tar.gz upload                              historian-watchdog.service
   → DynamoDB at 0% rollout                                    ↓ 30s health loop
                                                                auto-restart on failure
@@ -38,28 +39,50 @@ register-release Lambda
 | `bin/historian-provision` | Factory provisioner — bare metal to smoke-tested appliance | Device |
 | `bin/hist-release` | Release packager — build, sign, upload to S3 | Dev Mac |
 | `lib/provisioner.rb` | 6-phase provisioning pipeline | Device |
-| `lib/deployment_orchestrator.rb` | Docker Compose deployment from `deployment.lock` | Device |
-| `lib/service_manager.rb` | Service lifecycle (start/stop/restart/health) | Device |
+| `lib/deployment_orchestrator.rb` | Multi-phase Docker Compose deployment from `deployment.lock` | Device |
+| `lib/service_manager.rb` | Service lifecycle (start/stop/restart/health), migrations, model pulls | Device |
 | `lib/service.rb` | Individual service abstraction | Device |
 | `lib/updater.rb` | Pull-only update pipeline (S3 → verify → apply) | Device |
 | `lib/watchdog.rb` | Container health monitor with lockfile coordination | Device |
+| `lib/watchdog_daemon.rb` | Watchdog process entry point | Device |
 | `lib/telemetry.rb` | Appliance health snapshots (no PII, no content) | Device |
 | `lib/release_packager.rb` | Tarball + manifest + sign + upload pipeline | Dev Mac |
 | `systemd/` | Systemd units: watchdog, updater, performance | Device |
 | `lambda/` | AWS Lambda functions + SAM template | AWS |
-| `compose.registry.yml` | Docker Compose for production services | Device |
+| `docs/` | Flash guide and hardware documentation | Reference |
+| `compose.registry.yml` | Docker Compose for production services (10 containers) | Device |
 | `deployment.lock` | Pinned image digests per release | Device |
-| `services.yml` | Service definitions and health checks | Device |
-| `platform_manifest.yml` | Hardware detection and config lookup | Device |
+| `services.yml` | Service definitions, health checks, and Ollama model config | Device |
+| `platform_manifest.yml` | Hardware detection, platform config (Jetson / GX10) | Device |
+| `gx10-performance.sh` | GPU clock-locking script for consistent inference | Device |
+| `prod.env.example` | Template for production environment variables | Device |
+| `update_config.yml.example` | Template for device update/registration config | Device |
 | `VERSION` | Current release version | Both |
 
 ### Device Filesystem
 
 ```
 /opt/historian/         ← this repo (installed by provisioner)
-/data/historian/        ← persistent data (vault, databases, models, SSL)
+/data/historian/        ← persistent data (vault, databases, models, SSL, soundtracks)
 /logs/historian/        ← application logs
 ```
+
+---
+
+## Services (10 containers)
+
+| Service | Image | Purpose |
+|---|---|---|
+| `redis` | `redis:7` | Cache and job queue |
+| `ollama` | `ollama/ollama:latest` | AI model server (70B models on GX10) |
+| `asr` | `historian-asr` | Automatic Speech Recognition |
+| `chroma-db` | `historian-chroma-db` | ChromaDB vector database |
+| `embed` | `historian-embed` | Text embedding service |
+| `app` | `historian-app` | Main Historian application |
+| `app-proxy` | `historian-app-proxy` | Nginx reverse proxy + SSL termination |
+| `sidekiq` | `historian-app` (shared image) | Background job processor |
+| `audio-gateway` | `historian-audio-gateway` | WebSocket voice gateway |
+| `historian-tts` | `historian-tts` | NeMo FastPitch + HiFi-GAN TTS |
 
 ---
 
@@ -70,6 +93,7 @@ register-release Lambda
 - Freshly flashed Jetson/GX10 with JetPack (see `docs/flash_guide.md`)
 - Network connectivity to the device (SSH + internet for GitHub/Docker)
 - `FACTORY_SECRET` env var for device registration
+- `GHCR_TOKEN` env var (GitHub PAT with `read:packages` scope)
 
 ### Steps
 
@@ -82,13 +106,13 @@ git clone https://github.com/james-barnard/historian-deploy.git
 cd historian-deploy
 
 # 3. Run the provisioner
-sudo FACTORY_SECRET=your_secret bin/historian-provision
+sudo FACTORY_SECRET=your_secret GHCR_TOKEN=ghp_xxx bin/historian-provision
 
 # This runs 6 phases:
 #   Phase 1: VALIDATE   — arch, disk, Docker
-#   Phase 2: INSTALL    — system packages, NVIDIA runtime, Ruby deps
-#   Phase 3: CONFIGURE  — rsync to /opt/historian, directories, SSL,
-#                         systemd services, hist CLI, device registration
+#   Phase 2: INSTALL    — system packages, NVIDIA runtime, GHCR login, Ruby deps
+#   Phase 3: CONFIGURE  — rsync to /opt/historian, directories, permission healing,
+#                         SSL, systemd services, hist CLI, device registration
 #   Phase 4: DEPLOY     — pull images, start containers, pull Ollama models
 #   Phase 5: SMOKE TEST — verify all 7 service endpoints
 #   Phase 6: SEAL       — shut down services for shipping
@@ -103,6 +127,38 @@ sudo bin/historian-provision --dry-run           # Preview without changes
 sudo bin/historian-provision --skip-deploy       # Install only, no containers
 sudo bin/historian-provision --skip-seal         # Leave services running
 ```
+
+---
+
+## How To: Deploy (on device)
+
+The deployment orchestrator (`hist deploy`) runs a multi-phase lifecycle:
+
+```
+Phase 1: Validate deployment.lock
+Phase 2: Show deployment plan (services + digests)
+Phase 3: Pull images (parallel, with retry + exponential backoff)
+Phase 4: Setup data directories (permission healing via ephemeral root container)
+Phase 5: Setup system services:
+           • WiFi scan on-demand (systemd path unit from historian repo)
+           • Watcher USB auto-pairing (udev rules from historian repo)
+           • GX10 performance tuning (Tegra-only)
+Phase 6: Database migrations + schema verification
+Phase 7: Smart restart (only recreates containers with changed digests)
+Phase 8: Ollama optimizations + model pulls
+Phase 9: Validate all containers running with correct versions
+```
+
+### Permission Healing
+
+When Docker auto-creates host-mounted volumes, it creates them as `root`. The orchestrator detects this and runs an ephemeral Alpine container to `chmod 777` the directory, so non-root container users (e.g., `audio-gateway` UID 1000) can write to it.
+
+### Host-Level Service Installation
+
+The orchestrator installs systemd units and udev rules from the **historian source repo** (not `historian-deploy`). These files live in `~/historian/system/` and `~/historian/bin/` on the device:
+
+- **WiFi scan**: `historian-wifi-scan.path` + `.service` — triggered on-demand via file watch
+- **Watcher pairing**: `99-historian-watcher.rules` + `historian-pair@.service` — auto-pairs USB devices via udev
 
 ---
 
@@ -222,7 +278,7 @@ checksums:
 
 ## Bare-Metal Services
 
-Three systemd services run outside Docker:
+Four systemd services run outside Docker on the device:
 
 ```
 historian-watchdog.service      Always-on, 30s health loop
@@ -233,8 +289,22 @@ historian-updater.timer         Fires every 4 hours (30-min random jitter)
 historian-updater.service       Oneshot: check → download → verify → swap → deploy
                                 Creates lockfile so watchdog stands down
 
-historian-performance.service   GPU clock locking for consistent inference
+historian-performance.service   GPU clock locking for consistent inference (Tegra only)
+
+historian-wifi-scan.path        Watches for scan-request file; triggers nmcli scan
+historian-wifi-scan.service     Oneshot: runs WiFi scan script when .path fires
 ```
+
+---
+
+## Supported Platforms
+
+| Platform | RAM | GPU | Ollama Models |
+|---|---|---|---|
+| Jetson Orin Nano | 8 GB | Shared VRAM | `llama3.2:3b` |
+| Asus Ascent GX10 | 128 GB | Shared VRAM | `llama3.1:70b-instruct-q4_K_M` |
+
+Platform auto-detection uses `/etc/nv_tegra_release` + RAM thresholds. Override with `--platform`.
 
 ---
 
