@@ -427,7 +427,16 @@ class DeploymentOrchestrator
     puts "⚙️  Verifying system services..."
     puts ""
 
-    # Skip GX10 performance tuning when not on Tegra (GX10 host has NVIDIA GB10 / Tegra)
+    # --- Historian source (already on device via git pull) ---
+    historian_root = ENV.fetch("HISTORIAN_ROOT") { File.expand_path("~/historian") }
+
+    # --- WiFi scan on-demand (all platforms) ---
+    install_wifi_scan_service(historian_root)
+
+    # --- Watcher USB pairing (all platforms) ---
+    install_watcher_pairing(historian_root)
+
+    # --- GX10 performance tuning (Tegra only) ---
     unless File.exist?("/etc/nv_tegra_release")
       puts "   ℹ️  Skipping GX10 performance service (not on GX10/Tegra platform)"
       puts ""
@@ -438,15 +447,12 @@ class DeploymentOrchestrator
     performance_script = File.join(project_root, "gx10-performance.sh")
     install_script = File.join(project_root, "scripts", "install_gx10_performance_service.sh")
 
-    # Check if service is already installed and running
     if system("systemctl list-unit-files | grep -q historian-performance.service 2>/dev/null")
       puts "   ✅ GX10 performance service is installed"
 
-      # Check if service is enabled
       if system("systemctl is-enabled historian-performance.service >/dev/null 2>&1")
         puts "   ✅ Service is enabled (will run on boot)"
 
-        # Check if service is active
         if system("systemctl is-active historian-performance.service >/dev/null 2>&1")
           puts "   ✅ Service is running (performance tuning active)"
         else
@@ -481,6 +487,66 @@ class DeploymentOrchestrator
       puts "   ℹ️  Not on GX10 (performance service not applicable)"
     end
     puts ""
+  end
+
+  def install_wifi_scan_service(historian_root)
+    system_dir = File.join(historian_root, "system")
+    path_unit = File.join(system_dir, "historian-wifi-scan.path")
+    service_unit = File.join(system_dir, "historian-wifi-scan.service")
+    scan_script = File.join(historian_root, "bin", "historian-wifi-scan")
+
+    unless File.exist?(path_unit) && File.exist?(service_unit) && File.exist?(scan_script)
+      puts "   ℹ️  WiFi scan files not found in #{system_dir} — skipping"
+      return
+    end
+
+    if system("systemctl is-enabled historian-wifi-scan.path >/dev/null 2>&1")
+      puts "   ✅ WiFi scan service already installed"
+      return
+    end
+
+    puts "   ⚙️  Installing WiFi scan on-demand service..."
+    system("sudo cp #{path_unit} /etc/systemd/system/ 2>/dev/null") &&
+      system("sudo cp #{service_unit} /etc/systemd/system/ 2>/dev/null") &&
+      system("sudo chmod +x #{scan_script} 2>/dev/null") &&
+      system("sudo systemctl daemon-reload 2>/dev/null") &&
+      system("sudo systemctl enable --now historian-wifi-scan.path 2>/dev/null")
+
+    if system("systemctl is-enabled historian-wifi-scan.path >/dev/null 2>&1")
+      puts "   ✅ WiFi scan service installed (on-demand trigger)"
+    else
+      puts "   ⚠️  WiFi scan service install failed (may need manual sudo)"
+    end
+  end
+
+  def install_watcher_pairing(historian_root)
+    system_dir = File.join(historian_root, "system")
+    udev_rule = File.join(system_dir, "99-historian-watcher.rules")
+    service_unit = File.join(system_dir, "historian-pair@.service")
+    pairing_script = File.join(historian_root, "bin", "historian-pair-device")
+
+    unless File.exist?(udev_rule) && File.exist?(service_unit) && File.exist?(pairing_script)
+      puts "   ℹ️  Watcher pairing files not found in #{system_dir} — skipping"
+      return
+    end
+
+    if File.exist?("/etc/udev/rules.d/99-historian-watcher.rules")
+      puts "   ✅ Watcher USB pairing already installed"
+      return
+    end
+
+    puts "   ⚙️  Installing Watcher USB auto-pairing..."
+    system("sudo cp #{udev_rule} /etc/udev/rules.d/ 2>/dev/null") &&
+      system("sudo cp #{service_unit} /etc/systemd/system/ 2>/dev/null") &&
+      system("sudo chmod +x #{pairing_script} 2>/dev/null") &&
+      system("sudo udevadm control --reload-rules 2>/dev/null") &&
+      system("sudo systemctl daemon-reload 2>/dev/null")
+
+    if File.exist?("/etc/udev/rules.d/99-historian-watcher.rules")
+      puts "   ✅ Watcher USB pairing installed (udev auto-detect)"
+    else
+      puts "   ⚠️  Watcher pairing install failed (may need manual sudo)"
+    end
   end
 
   def setup_ollama_optimizations
