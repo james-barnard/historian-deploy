@@ -141,6 +141,13 @@ class DeploymentOrchestrator
     puts ""
   end
 
+  # Services that are gated to a specific compose profile
+  PROFILE_SERVICES = {
+    "asr" => "gx10",
+    "historian-tts" => "gx10",
+    "asr-whisper" => "jetson",
+  }.freeze
+
   def pull_images_from_lock
     puts "📥 Pulling images from registry (parallel)..."
     puts ""
@@ -154,6 +161,13 @@ class DeploymentOrchestrator
         # Skip external services (official images)
         if digest == "external"
           puts "   📦 #{service.ljust(15)} - skipping (external)"
+          next
+        end
+
+        # Skip services not needed on this platform
+        required_profile = PROFILE_SERVICES[service]
+        if required_profile && required_profile != platform_profile
+          puts "   📦 #{service.ljust(15)} - skipping (#{required_profile}-only)"
           next
         end
 
