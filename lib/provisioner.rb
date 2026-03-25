@@ -335,6 +335,9 @@ class Provisioner
       historian-updater.service
       historian-updater.timer
       historian-performance.service
+      historian-wifi-scan.path
+      historian-wifi-scan.service
+      historian-pair@.service
     ]
 
     step "Installing systemd services"
@@ -364,6 +367,21 @@ class Provisioner
       run_cmd("chmod +x #{Shellwords.escape(perf_script)}") if File.exist?(perf_script) || @dry_run
       run_cmd("systemctl enable historian-performance.service")
       run_cmd("systemctl start historian-performance.service")
+    end
+
+    # Enable WiFi scan on-demand trigger
+    wifi_scan_script = File.join(INSTALL_ROOT, "bin", "historian-wifi-scan")
+    run_cmd("chmod +x #{Shellwords.escape(wifi_scan_script)}") if File.exist?(wifi_scan_script) || @dry_run
+    run_cmd("systemctl enable historian-wifi-scan.path")
+    run_cmd("systemctl start historian-wifi-scan.path")
+
+    # Install Watcher USB pairing udev rule
+    udev_rule = File.join(systemd_dir, "99-historian-watcher.rules")
+    if File.exist?(udev_rule) || @dry_run
+      run_cmd("cp #{Shellwords.escape(udev_rule)} /etc/udev/rules.d/99-historian-watcher.rules")
+      run_cmd("udevadm control --reload-rules")
+      pairing_script = File.join(INSTALL_ROOT, "bin", "historian-pair-device")
+      run_cmd("chmod +x #{Shellwords.escape(pairing_script)}") if File.exist?(pairing_script) || @dry_run
     end
 
     step "Systemd services installed and enabled"

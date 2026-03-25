@@ -1,0 +1,25 @@
+#!/bin/bash
+# historian-wifi-scan — scans WiFi networks and writes results to the shared volume
+#
+# Runs on the HOST (not inside Docker) because nmcli needs access to
+# the host's NetworkManager/WiFi adapter.
+#
+# Triggered on-demand by systemd path unit (historian-wifi-scan.path)
+# when the app container writes a .wifi_scan_trigger file.
+
+OUTPUT_FILE="/data/historian/database/sqlite/wifi_scan.json"
+
+# Scan and produce JSON
+nmcli -t -f SSID,SIGNAL,SECURITY dev wifi list 2>/dev/null | \
+  awk -F: '
+    BEGIN { printf "[" }
+    NF >= 2 && $1 != "" && !seen[$1]++ {
+      if (n++) printf ","
+      gsub(/"/, "\\\"", $1)
+      gsub(/"/, "\\\"", $3)
+      printf "{\"ssid\":\"%s\",\"signal\":%d,\"security\":\"%s\"}", $1, $2, $3
+    }
+    END { printf "]\n" }
+  ' > "${OUTPUT_FILE}.tmp" && mv "${OUTPUT_FILE}.tmp" "${OUTPUT_FILE}"
+
+chmod 644 "${OUTPUT_FILE}" 2>/dev/null

@@ -1,0 +1,12 @@
+# Watch for WiFi scan requests from the app container
+# When the trigger file appears on the shared volume, run the scan
+
+[Unit]
+Description=Watch for WiFi scan trigger from Historian app
+
+[Path]
+PathExists=/data/historian/database/sqlite/.wifi_scan_trigger
+Unit=historian-wifi-scan.service
+
+[Install]
+WantedBy=multi-user.target

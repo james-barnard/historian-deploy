@@ -1,0 +1,212 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# historian-pair-device — USB Watcher pairing daemon
+#
+# Triggered automatically by udev when a Watcher is plugged into USB.
+# Performs the HELLO → PAIR → VERIFY handshake over serial (USB CDC).
+#
+# Usage: historian-pair-device /dev/ttyACM0
+
+require "json"
+require "securerandom"
+require "yaml"
+require "logger"
+require "timeout"
+
+LOGGER = Logger.new($stdout)
+LOGGER.formatter = proc do |severity, datetime, _progname, msg|
+  "#{datetime.strftime('%Y-%m-%d %H:%M:%S')} [#{severity}] [PAIR] #{msg}\n"
+end
+
+HISTORIAN_ROOT = ENV.fetch("HISTORIAN_ROOT", "/opt/historian")
+NETWORK_CONFIG = File.join(HISTORIAN_ROOT, "network_config.yml")
+DB_PATH = ENV.fetch("HISTORIAN_DB", "/data/historian/database/sqlite/historian.sqlite")
+HISTORIAN_ID = ENV.fetch("HISTORIAN_ID") { "H-#{`hostname -s`.strip}" }
+HISTORIAN_PORT = ENV.fetch("HISTORIAN_PORT", "8446")
+
+SERIAL_BAUD = 115_200
+HANDSHAKE_TIMEOUT = 15
+
+class PairingError < StandardError; end
+
+class WatcherPairer
+  def initialize(serial_path)
+    @serial_path = serial_path
+    @serial = nil
+  end
+
+  def pair!
+    LOGGER.info "Starting pairing on #{@serial_path}"
+
+    configure_serial
+    open_serial
+
+    # Step 1: HELLO
+    hello_ack = send_hello
+    mac = hello_ack["mac"]
+    device_id = "W-#{mac}"
+    fw = hello_ack["fw"]
+    already_paired = hello_ack["paired"]
+
+    LOGGER.info "Watcher responded: MAC=#{mac} FW=#{fw} paired=#{already_paired}"
+
+    if already_paired && hello_ack["historian_id"] == HISTORIAN_ID
+      LOGGER.info "Already paired to this Historian (#{device_id}), skipping"
+      return { status: "already_paired", device_id: device_id }
+    end
+
+    # Step 2: PAIR
+    wifi = load_wifi_config
+    pair_token = SecureRandom.hex(32)
+
+    send_pair(
+      device_id: device_id,
+      pair_token: pair_token,
+      historian_id: HISTORIAN_ID,
+      host: local_ip,
+      port: HISTORIAN_PORT.to_i,
+      wifi_ssid: wifi["ssid"],
+      wifi_pass: wifi["password"]
+    )
+
+    # Step 3: VERIFY
+    verify_result = send_verify
+    unless verify_result["nvs_ok"]
+      raise PairingError, "NVS verification failed on Watcher"
+    end
+
+    record_pairing(device_id, mac, fw, pair_token)
+
+    LOGGER.info "✅ Pairing complete: #{device_id} (#{mac})"
+    { status: "paired", device_id: device_id, mac: mac, firmware: fw }
+  rescue StandardError => e
+    LOGGER.error "Pairing failed: #{e.class}: #{e.message}"
+    raise
+  ensure
+    @serial&.close
+  end
+
+  private
+
+  def configure_serial
+    system("stty -F #{@serial_path} #{SERIAL_BAUD} cs8 -cstopb -parenb raw -echo 2>/dev/null")
+  end
+
+  def open_serial
+    @serial = File.open(@serial_path, "r+")
+    @serial.sync = true
+    sleep 0.5
+    @serial.read_nonblock(4096) rescue nil
+  end
+
+  def send_json(cmd)
+    line = JSON.generate(cmd)
+    LOGGER.debug "TX: #{line}"
+    @serial.write("#{line}\n")
+    @serial.flush
+  end
+
+  def read_response(expected_cmd, timeout: HANDSHAKE_TIMEOUT)
+    Timeout.timeout(timeout) do
+      loop do
+        line = @serial.gets&.strip
+        next if line.nil? || line.empty?
+        next unless line.start_with?("{")
+
+        LOGGER.debug "RX: #{line}"
+        data = JSON.parse(line)
+        return data if data["cmd"] == expected_cmd
+
+        if data["cmd"]&.end_with?("_FAIL")
+          raise PairingError, "Watcher error: #{data['cmd']} — #{data['error']}"
+        end
+      end
+    end
+  rescue Timeout::Error
+    raise PairingError, "Timeout waiting for #{expected_cmd} (#{timeout}s)"
+  end
+
+  def send_hello
+    send_json({ cmd: "HELLO", historian_id: HISTORIAN_ID, v: 1 })
+    read_response("HELLO_ACK")
+  end
+
+  def send_pair(device_id:, pair_token:, historian_id:, host:, port:, wifi_ssid:, wifi_pass:)
+    send_json({
+      cmd: "PAIR",
+      device_id: device_id,
+      pair_token: pair_token,
+      historian_id: historian_id,
+      host: host,
+      port: port,
+      wifi_ssid: wifi_ssid,
+      wifi_pass: wifi_pass,
+    })
+    read_response("PAIR_OK")
+  end
+
+  def send_verify
+    send_json({ cmd: "VERIFY" })
+    read_response("VERIFY_OK")
+  end
+
+  def load_wifi_config
+    raise PairingError, "WiFi not configured (#{NETWORK_CONFIG} missing)" unless File.exist?(NETWORK_CONFIG)
+
+    config = YAML.load_file(NETWORK_CONFIG)
+    wifi = config&.dig("wifi")
+    raise PairingError, "WiFi config missing ssid/password" unless wifi&.dig("ssid") && wifi&.dig("password")
+
+    wifi
+  end
+
+  def local_ip
+    result = `hostname -I 2>/dev/null`.strip.split.first
+    result || `ip route get 1 2>/dev/null | awk '{print $7; exit}'`.strip
+  rescue StandardError
+    "historian.local"
+  end
+
+  def record_pairing(device_id, mac, firmware_version, _pair_token)
+    require "sqlite3"
+
+    db = SQLite3::Database.new(DB_PATH)
+    db.execute(<<~SQL, device_id, mac, firmware_version, HISTORIAN_ID, Time.now.utc.iso8601)
+      INSERT INTO watchers (device_id, mac_address, firmware_version, historian_id, paired_at, status)
+      VALUES (?, ?, ?, ?, ?, 'active')
+      ON CONFLICT(device_id) DO UPDATE SET
+        firmware_version = excluded.firmware_version,
+        paired_at = excluded.paired_at,
+        status = 'active'
+    SQL
+    db.close
+
+    LOGGER.info "Recorded pairing in database: #{device_id}"
+  rescue LoadError
+    LOGGER.warn "sqlite3 gem not available, skipping DB record"
+  rescue StandardError => e
+    LOGGER.warn "Failed to record pairing in DB: #{e.message}"
+  end
+end
+
+if __FILE__ == $PROGRAM_NAME
+  serial_path = ARGV[0]
+
+  unless serial_path && File.exist?(serial_path)
+    LOGGER.error "Usage: historian-pair-device /dev/ttyACMx"
+    exit 1
+  end
+
+  begin
+    result = WatcherPairer.new(serial_path).pair!
+    LOGGER.info "Result: #{result.to_json}"
+    exit 0
+  rescue PairingError => e
+    LOGGER.error "Pairing failed: #{e.message}"
+    exit 1
+  rescue StandardError => e
+    LOGGER.error "Unexpected error: #{e.class}: #{e.message}"
+    exit 2
+  end
+end
