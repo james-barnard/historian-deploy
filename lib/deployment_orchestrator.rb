@@ -247,6 +247,7 @@ class DeploymentOrchestrator
     puts "   🧹 Stopping existing containers..."
     system("docker ps -a --filter name=historian- --format '{{.Names}}' | xargs -r docker rm -f 2>/dev/null")
     system("#{env_vars} #{compose_base_cmd} down --remove-orphans 2>&1")
+    system("docker network prune -f 2>/dev/null")
 
     # Bring everything up fresh
     success = system("#{env_vars} #{compose_base_cmd} up -d 2>&1")
