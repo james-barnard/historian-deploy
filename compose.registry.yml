@@ -63,7 +63,6 @@ services:
     depends_on:
       - redis
       - sidekiq
-      - asr
       - embed
       - chroma-db
       - ollama
@@ -129,7 +128,6 @@ services:
       # Override with: HISTORIAN_PLATFORM, CONTEXT_PASS_MODEL, EVENTS_PASS_MODEL
     depends_on:
       - redis
-      - asr
       - embed
       - chroma-db
       - ollama
@@ -214,7 +212,9 @@ services:
       - WHISPER_DEVICE=cpu
       - WHISPER_COMPUTE=int8
     networks:
-      - historian-network
+      historian-network:
+        aliases:
+          - asr
     logging:
       driver: "json-file"
       options:
@@ -305,7 +305,6 @@ services:
     depends_on:
       - redis
       - app
-      - asr
     networks:
       - historian-network
     logging:
