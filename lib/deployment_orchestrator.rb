@@ -148,31 +148,6 @@ class DeploymentOrchestrator
     "asr-whisper" => "jetson",
   }.freeze
 
-  # Container names that belong to each profile (for cleanup)
-  PROFILE_CONTAINERS = {
-    "gx10" => %w[historian-asr historian-tts],
-    "jetson" => %w[historian-asr-whisper],
-  }.freeze
-
-  # Remove containers from profiles that are NOT active on this platform.
-  # Ensures idempotent provisioning when switching between platforms or
-  # re-provisioning after a profile change.
-  def cleanup_stale_profile_containers
-    active = platform_profile
-    stale_containers = PROFILE_CONTAINERS
-      .reject { |profile, _| profile == active }
-      .values.flatten
-
-    stale_containers.each do |name|
-      # Check if container exists (running or stopped)
-      exists = `docker ps -a --filter name=^/#{name}$ --format '{{.Names}}' 2>/dev/null`.strip
-      next if exists.empty?
-
-      puts "   🧹 Removing stale container: #{name} (wrong profile)"
-      system("docker rm -f #{name} 2>/dev/null")
-    end
-  end
-
   def pull_images_from_lock
     puts "📥 Pulling images from registry (parallel)..."
     puts ""
@@ -263,25 +238,17 @@ class DeploymentOrchestrator
   end
 
   def start_services_from_lock
-    puts "🚀 Starting services (smart restart)..."
+    puts "🚀 Starting services..."
     puts ""
 
     env_vars = build_environment_string
 
-    # Clean up containers from the opposite platform profile
-    cleanup_stale_profile_containers
+    # Clean slate: stop and remove all existing containers
+    puts "   🧹 Stopping existing containers..."
+    system("#{env_vars} #{compose_base_cmd} down --remove-orphans 2>&1")
 
-    # Detect services whose images have changed (same tag, different digest)
-    stale_services = detect_stale_services
-    if stale_services.any?
-      puts "   🔄 Detected stale containers: #{stale_services.join(', ')}"
-      stale_services.each do |svc|
-        system("#{env_vars} #{compose_base_cmd} up -d --force-recreate --no-deps #{svc} 2>&1")
-      end
-    end
-
-    # Then do a normal 'up -d' to start/balance everything else
-    success = system("#{env_vars} #{compose_base_cmd} up -d --remove-orphans 2>&1")
+    # Bring everything up fresh
+    success = system("#{env_vars} #{compose_base_cmd} up -d 2>&1")
 
     unless success
       puts "❌ Failed to start services"
