@@ -432,7 +432,31 @@ class DeploymentOrchestrator
   end
 
   def run_database_migrations
-    ServiceManager.new.run_database_migrations
+    puts "🗄️  Running database migrations..."
+
+    # Wait for app container to be running (it may crash-loop until schema exists)
+    container = "historian-app"
+    30.times do
+      break if `docker ps --format '{{.Names}}' 2>/dev/null`.include?(container)
+      sleep 1
+    end
+
+    unless `docker ps --format '{{.Names}}' 2>/dev/null`.include?(container)
+      puts "   ⚠️  #{container} not running — skipping migrations"
+      return
+    end
+
+    # Run DbMigrator.migrate! inside the app container
+    success = system(
+      "docker exec #{container} bundle exec ruby -e " \
+      "\"require_relative '/app/lib/db_migrator'; DbMigrator.migrate!\" 2>&1"
+    )
+
+    if success
+      puts "   ✅ Database migrations complete"
+    else
+      puts "   ⚠️  Migration exited non-zero (may retry on next app restart)"
+    end
   end
 
   def verify_database_schema

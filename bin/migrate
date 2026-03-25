@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Run database migrations inside the historian-app container.
+# Called by the deployment orchestrator after starting services.
+set -e
+
+CONTAINER="historian-app"
+
+echo "🗄️  Running database migrations..."
+
+# Wait for container to exist (may still be starting)
+for i in $(seq 1 30); do
+  if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
+    break
+  fi
+  sleep 1
+done
+
+if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
+  echo "  ⚠️  Container ${CONTAINER} not running — skipping migrations"
+  exit 0
+fi
+
+docker exec "$CONTAINER" bundle exec ruby -e "
+  require_relative '/app/lib/db_migrator'
+  DbMigrator.migrate!
+"
+
+echo "  ✅ Migrations complete"
