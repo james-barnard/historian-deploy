@@ -32,12 +32,12 @@ class DeploymentOrchestrator
     # Phase 5: Setup system services (one-time setup)
     setup_system_services
 
-    # Phase 4.5: Create/update database schema (migrations + verify)
+    # Phase 5: Start services
+    start_services_from_lock
+
+    # Phase 6: Create/update database schema (must run after compose up)
     run_database_migrations
     verify_database_schema
-
-    # Phase 5: Start services (SMART RESTART)
-    start_services_from_lock
 
     # Phase 6: Setup Ollama optimizations (after Ollama container is running)
     setup_ollama_optimizations
@@ -447,9 +447,11 @@ class DeploymentOrchestrator
     end
 
     # Run DbMigrator.migrate! inside the app container
+    # Must connect to DB first, then create schema
     success = system(
       "docker exec #{container} bundle exec ruby -e " \
-      "\"require_relative '/app/lib/db_migrator'; DbMigrator.migrate!\" 2>&1"
+      "\"require_relative '/app/lib/db'; Db.connect!; " \
+      "require_relative '/app/lib/db_migrator'; DbMigrator.migrate!\" 2>&1"
     )
 
     if success
