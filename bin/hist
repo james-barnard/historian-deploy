@@ -22,6 +22,13 @@ lock_image_val() {
 }
 
 detect_platform() {
+  # Override: .platform file takes precedence (e.g. "gx10" for AGX Orin)
+  if [ -f "$DEPLOY_ROOT/.platform" ]; then
+    cat "$DEPLOY_ROOT/.platform" | tr -d '[:space:]'
+    return
+  fi
+
+  # Auto-detect: Tegra/Jetson → jetson, everything else → gx10
   if [ -f /etc/nv_tegra_release ] || grep -qi "tegra\|jetson" /proc/device-tree/model 2>/dev/null; then
     echo "jetson"
   else
