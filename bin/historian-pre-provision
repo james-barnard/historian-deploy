@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+# historian-pre-provision — One-time hardware setup for Historian appliances
+#
+# Run as root on a fresh device:
+#   sudo bash historian-pre-provision.sh
+#
+# What it does:
+#   1. Creates 'historian' user (with docker group)
+#   2. Finds the NVMe SSD
+#   3. Formats and mounts it at /data
+#   4. Creates Historian directory structure
+#   5. Installs /data fstab entry for boot persistence
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Preflight
+# ---------------------------------------------------------------------------
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "❌ Must run as root: sudo bash $0"
+  exit 1
+fi
+
+echo "🔧 Historian Pre-Provisioning"
+echo "=================================================="
+echo ""
+
+# ---------------------------------------------------------------------------
+# 1. Create historian user
+# ---------------------------------------------------------------------------
+
+HIST_USER="historian"
+
+if id "$HIST_USER" &>/dev/null; then
+  echo "✅ User '$HIST_USER' already exists"
+else
+  echo "👤 Creating user '$HIST_USER'..."
+  useradd -m -s /bin/bash "$HIST_USER"
+  echo "   ✅ User created"
+fi
+
+# Add to docker group
+if getent group docker &>/dev/null; then
+  usermod -aG docker "$HIST_USER"
+  echo "   ✅ Added to docker group"
+else
+  echo "   ⚠️  docker group not found — install Docker first?"
+fi
+
+# Allow passwordless sudo for historian (for systemd service management)
+if [ ! -f /etc/sudoers.d/historian ]; then
+  echo "$HIST_USER ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/historian
+  chmod 440 /etc/sudoers.d/historian
+  echo "   ✅ Passwordless sudo configured"
+fi
+
+echo ""
+
+# ---------------------------------------------------------------------------
+# 2. Find NVMe device
+# ---------------------------------------------------------------------------
+
+echo "💾 Looking for NVMe SSD..."
+
+NVME_DEV=""
+for dev in /dev/nvme0n1 /dev/nvme1n1; do
+  if [ -b "$dev" ]; then
+    NVME_DEV="$dev"
+    break
+  fi
+done
+
+if [ -z "$NVME_DEV" ]; then
+  echo "   ❌ No NVMe device found"
+  echo "   Available block devices:"
+  lsblk
+  exit 1
+fi
+
+echo "   Found: $NVME_DEV"
+echo "   $(lsblk -no SIZE "$NVME_DEV" | head -1) total"
+echo ""
+
+# ---------------------------------------------------------------------------
+# 3. Check if already mounted at /data
+# ---------------------------------------------------------------------------
+
+if mountpoint -q /data 2>/dev/null; then
+  echo "✅ /data is already mounted:"
+  df -h /data | tail -1
+  echo ""
+else
+  # Check if NVMe has partitions already
+  NVME_PART="${NVME_DEV}p1"
+
+  if [ ! -b "$NVME_PART" ]; then
+    echo "📀 Partitioning $NVME_DEV..."
+    parted -s "$NVME_DEV" mklabel gpt
+    parted -s "$NVME_DEV" mkpart primary ext4 0% 100%
+    sleep 1  # wait for kernel to pick up partition
+    echo "   ✅ Partition created: $NVME_PART"
+  else
+    echo "   ℹ️  Partition $NVME_PART already exists"
+  fi
+
+  # Format if no filesystem
+  if ! blkid "$NVME_PART" | grep -q "TYPE="; then
+    echo "📀 Formatting $NVME_PART as ext4..."
+    mkfs.ext4 -q "$NVME_PART"
+    echo "   ✅ Formatted"
+  else
+    echo "   ℹ️  Filesystem already exists: $(blkid -s TYPE -o value "$NVME_PART")"
+  fi
+
+  # Mount
+  echo "📁 Mounting $NVME_PART at /data..."
+  mkdir -p /data
+  mount "$NVME_PART" /data
+  echo "   ✅ Mounted"
+
+  # Add to fstab if not already there
+  if ! grep -q "$NVME_PART" /etc/fstab; then
+    echo "$NVME_PART /data ext4 defaults,noatime 0 2" >> /etc/fstab
+    echo "   ✅ Added to /etc/fstab"
+  fi
+  echo ""
+fi
+
+# ---------------------------------------------------------------------------
+# 4. Create Historian directory structure
+# ---------------------------------------------------------------------------
+
+echo "📂 Creating directory structure..."
+
+DIRS=(
+  /data/historian/database/sqlite
+  /data/historian/database/chroma
+  /data/historian/database/redis
+  /data/historian/vault
+  /data/historian/models
+  /data/historian/ollama
+  /data/historian/soundtrack
+  /data/historian/app-ssl
+)
+
+for dir in "${DIRS[@]}"; do
+  mkdir -p "$dir"
+done
+
+chown -R "$HIST_USER":"$HIST_USER" /data/historian
+echo "   ✅ All directories created and owned by $HIST_USER"
+echo ""
+
+# ---------------------------------------------------------------------------
+# 5. Create deploy directory
+# ---------------------------------------------------------------------------
+
+DEPLOY_DIR="/home/$HIST_USER/historian-deploy"
+if [ ! -d "$DEPLOY_DIR" ]; then
+  mkdir -p "$DEPLOY_DIR/bin"
+  chown -R "$HIST_USER":"$HIST_USER" "$DEPLOY_DIR"
+  echo "📁 Created $DEPLOY_DIR"
+else
+  echo "✅ $DEPLOY_DIR already exists"
+fi
+
+echo ""
+
+# ---------------------------------------------------------------------------
+# Summary
+# ---------------------------------------------------------------------------
+
+echo "=================================================="
+echo "✅ Pre-provisioning complete!"
+echo ""
+echo "   User:    $HIST_USER"
+echo "   NVMe:    $NVME_DEV → /data"
+echo "   Storage: $(df -h /data | tail -1 | awk '{print $2}') total, $(df -h /data | tail -1 | awk '{print $4}') available"
+echo ""
+echo "Next steps:"
+echo "   1. From your Mac, SCP deploy files:"
+echo "      scp bin/hist deployment.lock compose.registry.yml .pat $HIST_USER@<device>:~/historian-deploy/"
+echo "   2. On device, set platform:"
+echo "      echo 'gx10' > ~/historian-deploy/.platform"
+echo "   3. Deploy:"
+echo "      ~/historian-deploy/bin/hist deploy"
+echo ""
